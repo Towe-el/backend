@@ -1,135 +1,102 @@
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from google.cloud import aiplatform
 from vertexai.language_models import TextEmbeddingModel
-import time
 from tqdm import tqdm
 
-def check_credentials():
-    """Check Google Cloud authentication configuration"""
-    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    
-    if not project_id:
-        print("Error: GOOGLE_CLOUD_PROJECT environment variable is not set")
-        return False
-        
-    if not credentials_path:
-        print("Error: GOOGLE_APPLICATION_CREDENTIALS environment variable is not set")
-        return False
-        
-    if not os.path.exists(credentials_path):
-        print(f"Error: Can't find the authentication file: {credentials_path}")
-        return False
-    
-    return True
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+CRED_PATH  = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+LOCATION   = "us-central1"
+MODEL_NAME = "text-embedding-005"
 
-# check the authentication configuration
-if not check_credentials():
-    sys.exit(1)
+if not PROJECT_ID or not CRED_PATH:
+    sys.exit("Please export GOOGLE_CLOUD_PROJECT and GOOGLE_APPLICATION_CREDENTIALS before running.")
+if not os.path.exists(CRED_PATH):
+    sys.exit(f"Credential file not found: {CRED_PATH}")
 
-# initialize Google Cloud
-project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-location = "us-central1"
 
+print("Initialising Vertex AI client …")
+aiplatform.init(project=PROJECT_ID, location=LOCATION)
 try:
-    print("Initializing Google Cloud...")
-    aiplatform.init(project=project_id, location=location)
+    model = TextEmbeddingModel.from_pretrained(MODEL_NAME)
 except Exception as e:
-    print(f"Initialize Google Cloud failed: {str(e)}")
-    print("Please check your authentication configuration and network connection")
-    sys.exit(1)
+    sys.exit(f"Failed to load embedding model: {e}")
 
-# load the processed data
-print("Loading processed data...")
+
+INPUT_FILE  = "processed_emotions_with_counts.json"
+OUTPUT_FILE = "vectorized_emotions.json"
+
+print(f"Loading {INPUT_FILE} …")
 try:
-    with open('processed_emotions_with_counts.json', 'r', encoding='utf-8') as f:
-        data = json.load(f)
-except FileNotFoundError:
-    print("Error:Can't find processed_emotions_with_counts.json file")
-    print("Please ensure that you run the data processing script to generate this file first")
-    sys.exit(1)
-except json.JSONDecodeError:
-    print("Error:Can't parse JSON file")
-    print("Please ensure that the file format is correct")
-    sys.exit(1)
+    with open(INPUT_FILE, "r", encoding="utf-8") as f:
+        documents = json.load(f)
+except Exception as exc:
+    sys.exit(f"Failed to read {INPUT_FILE}: {exc}")
 
-# initialize the text embedding model
-print("Initializing text embedding model...")
-try:
-    model = TextEmbeddingModel.from_pretrained("text-embedding-005")
-except Exception as e:
-    print(f"Initialize model failed: {str(e)}")
-    sys.exit(1)
+total_docs = len(documents)
+print(f"Loaded {total_docs} documents.\n")
 
-def get_embedding(text):
-    """Get the embedding of the text"""
+
+# ------------------------------------------
+BATCH_SIZE   = 250   # maximum allowed by Vertex AI for text-embedding models
+MAX_WORKERS  = 20    # 20 × 250 = 5000 texts
+CHECKPOINT_EVERY = 1000
+
+def embed_batch(batch):
+    """Call Vertex AI once for a list[str] -> list[list[float]]."""
+    texts = [doc["text"] for doc in batch]
     try:
-        embeddings = model.get_embeddings([text])
-        return embeddings[0].values
-    except Exception as e:
-        print(f"Get embedding failed: {text[:50]}...")
-        print(f"Error information: {str(e)}")
-        return None
+        vec_objs = model.get_embeddings(texts, output_dimensionality=256)
+        return [v.values for v in vec_objs]
+    except Exception as err:
+        # propagate—outer wrapper will count error & retry / skip
+        raise RuntimeError(f"Vertex AI batch embed failed: {err}")
 
-# batch size
-BATCH_SIZE = 5  # Vertex AI has QPS limit, so we use small batch size
-print(f"\nStart processing {len(data)} documents, batch size is {BATCH_SIZE}...")
+# Split documents into chunks of BATCH_SIZE
+def chunkify(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i : i + n]
 
-# process all documents
-processed_count = 0
-error_count = 0
-processed_data = []
+processed, failed = 0, 0
+out_docs = []
+print(f"Vectorising with batch={BATCH_SIZE}, concurrency={MAX_WORKERS} …")
 
-try:
-    for i in tqdm(range(0, len(data), BATCH_SIZE)):
-        batch = data[i:i + BATCH_SIZE]
-        
-        for doc in batch:
-            try:
-                # get the vector representation of the text
-                vector = get_embedding(doc['text'])
-                
-                if vector is not None:
-                    # add the vector to the document
-                    doc['vector'] = vector
-                    processed_data.append(doc)
-                    processed_count += 1
-                else:
-                    error_count += 1
-                
-            except Exception as e:
-                print(f"\nError processing document: {str(e)}")
-                error_count += 1
-            
-        # add a short delay to comply with API limit
-        time.sleep(1)
-        
-        # save checkpoint every 100 documents
-        if processed_count > 0 and processed_count % 100 == 0:
-            print(f"\nSave checkpoint, processed {processed_count} documents...")
-            with open('vectorized_emotions_vertex.json', 'w', encoding='utf-8') as f:
-                json.dump(processed_data, f, ensure_ascii=False, indent=2)
 
-except KeyboardInterrupt:
-    print("\nUser interrupted. Saving current progress...")
-except Exception as e:
-    print(f"\nError: {str(e)}")
-finally:
-    # save the final result
-    print("\nSave final result...")
-    with open('vectorized_emotions_vertex.json', 'w', encoding='utf-8') as f:
-        json.dump(processed_data, f, ensure_ascii=False, indent=2)
+with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+    future_to_batch = {
+        pool.submit(embed_batch, batch): batch for batch in chunkify(documents, BATCH_SIZE)
+    }
 
-# print the processing statistics
-print("\nProcessing completed!")
-print(f"Successfully processed: {processed_count} documents")
-print(f"Failed to process: {error_count} documents")
+    for future in tqdm(as_completed(future_to_batch), total=len(future_to_batch)):
+        batch = future_to_batch[future]
+        try:
+            vectors = future.result()
+            for doc, vec in zip(batch, vectors):
+                doc["vector"] = vec
+                out_docs.append(doc)
+                processed += 1
+        except Exception as exc:
+            # fall back to single‑item retry to salvage as much as possible
+            failed += len(batch)
+            print(f"[warn] batch of {len(batch)} failed → {exc}")
 
-# show an example document (including vector)
-if processed_data:
-    print("\nExample document structure:")
-    sample = processed_data[0].copy()
-    sample['vector'] = sample['vector'][:5] + ['...']  # only show the first 5 vector values
-    print(json.dumps(sample, ensure_ascii=False, indent=2)) 
+        # checkpoint regularly
+        if processed % CHECKPOINT_EVERY == 0 and processed != 0:
+            with open(OUTPUT_FILE, "w", encoding="utf-8") as fp:
+                json.dump(out_docs, fp, ensure_ascii=False, indent=2)
+            print(f"checkpoint written - {processed} vectors so far")
+
+
+print("Writing final output …")
+with open(OUTPUT_FILE, "w", encoding="utf-8") as fp:
+    json.dump(out_docs, fp, ensure_ascii=False, indent=2)
+print(f"Done! processed={processed}, failed={failed}")
+
+if out_docs:
+    demo = out_docs[0].copy()
+    demo["vector"] = demo["vector"][:5] + ["…"]
+    print("\nExample document:")
+    print(json.dumps(demo, ensure_ascii=False, indent=2))

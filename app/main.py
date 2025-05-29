@@ -15,12 +15,12 @@ from pymongo import ReturnDocument
 from app.api.endpoints import search
 
 app = FastAPI(
-    title="GoEmotions API",
-    summary="A sample application showing how to use FastAPI to add a ReST API to a MongoDB collection.",
+    title="Toweel backend API",
+    summary="Test vector search.",
 )
 client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URL"])
 db = client.GoEmotion
-student_collection = db.get_collection("rawData")
+vectorized_text_collection = db.get_collection("vectorizedText")
 
 # Represents an ObjectId field in the database.
 # It will be represented as a `str` on the model so that it can be serialized to JSON.

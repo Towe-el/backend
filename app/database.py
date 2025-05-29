@@ -5,8 +5,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 client = AsyncIOMotorClient(os.environ["MONGODB_URL"])
 
 # Database
-db = client.GoEmotion  # 使用同一个数据库
+db = client.GoEmotion
 
 # Collections
-raw_data_collection = db.get_collection("rawData")  # 被搜索的集合
-emotion_history_collection = db.get_collection("emotionHistory")  # 存储搜索历史的集合 
+raw_data_collection = db.get_collection("vectorizedText")
+emotion_history_collection = db.get_collection("emotionHistory")

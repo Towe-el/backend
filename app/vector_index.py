@@ -7,30 +7,22 @@ from pymongo.server_api import ServerApi
 # Connect to MongoDB
 client = MongoClient(os.environ["MONGODB_URL"], server_api=ServerApi('1'))
 db = client.GoEmotion
-collection = db.rawData
+collection = db.vectorizedText
 
 # Define the vector search index
 index_definition = {
     "mappings": {
-        "dynamic": False,  # set to False to explicitly specify fields
+        "dynamic": False,
         "fields": {
             "vector": {
                 "type": "knnVector",
-                "dimensions": 384,
+                "dimensions": 256,
                 "similarity": "cosine"
             },
             "text": {
-                "type": "string",
-                "analyzer": "lucene.standard"  # add the standard analyzer
-            },
-            "emotion_label": {
-                "type": "string",
-                "analyzer": "lucene.standard"
+                "type": "string"
             }
         }
-    },
-    "storedSource": {
-        "include": ["text", "emotion_label"]
     }
 }
 
@@ -50,7 +42,7 @@ try:
         collection.drop_search_index(index_name)
         print(f"Index '{index_name}' dropped successfully!")
         # add a short delay to wait for the deletion operation to complete
-        time.sleep(5)
+        time.sleep(15)
 
     # create the index model
     print("\nCreating new search index...")
@@ -64,7 +56,7 @@ try:
     print(f"Vector search index '{result}' created successfully!")
 
     # wait for the index creation to complete
-    time.sleep(5)
+    time.sleep(10)
 
     # verify the final index status
     print("\nFinal search indexes:")

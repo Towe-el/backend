@@ -22,16 +22,17 @@ async def search_emotions(query: SearchQuery):
     Search for similar texts in GoEmotion database using semantic search
     """
     try:
-        # 执行语义搜索
+        # semantic search
         search_results = await semantic_search(query.text)
         
-        # 提取文本
+        # extract text
         similar_texts = [result["text"] for result in search_results]
         
-        # 保存搜索历史
+        # save search history
         history = await save_search_history(query.text, similar_texts)
         
         return history
+
     except Exception as e:
         raise HTTPException(
             status_code=500,

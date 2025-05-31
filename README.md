@@ -4,18 +4,7 @@
 
 Before running the project, set the following environment variables first：
 
-1. Create a `credentials` directory in the project root:
-```bash
-mkdir credentials
-```
-
-2. Place your Google Cloud service account key file in the credentials directory as `service-account.json`
-
-3. Create a `.env` file in the project root with the following content:
-```
-MONGODB_URL=MongoDB connection string
-GOOGLE_CLOUD_PROJECT=your-project-id
-```
+Create a `.env` file in the `backend\` directory. Copy paste the information transferred privately in the chat group.
 
 ## Quick Start
 

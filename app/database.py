@@ -9,4 +9,4 @@ db = client.GoEmotion
 
 # Collections
 raw_data_collection = db.get_collection("vectorizedText")
-emotion_history_collection = db.get_collection("emotionHistory")
+# emotion_history_collection = db.get_collection("emotionHistory")

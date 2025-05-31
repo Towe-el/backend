@@ -1,28 +1,39 @@
-# MongoDB with FastAPI
+# Toweel Backend API
 
-This is a small sample project demonstrating how to build an API with [MongoDB](https://developer.mongodb.com/) and [FastAPI](https://fastapi.tiangolo.com/).
-It was written to accompany a [blog post](https://developer.mongodb.com/quickstart/python-quickstart-fastapi/) - you should go read it!
+## Environment Variables
 
-If you want to fastrack your project even further, check out the [MongoDB FastAPI app generator](https://github.com/mongodb-labs/full-stack-fastapi-mongodb) and eliminate much of the boilerplate of getting started.
+Before running the project, set the following environment variables first：
 
-## TL;DR
-
-If you really don't want to read the [blog post](https://developer.mongodb.com/quickstart/python-quickstart-fastapi/) and want to get up and running,
-activate your Python virtualenv, and then run the following from your terminal (edit the `MONGODB_URL` first!):
-
+1. Create a `credentials` directory in the project root:
 ```bash
-# Install the requirements:
-pip install -r requirements.txt
-
-# Configure the location of your MongoDB database:
-export MONGODB_URL="mongodb+srv://<username>:<password>@<url>/<db>?retryWrites=true&w=majority"
-
-# Start the service:
-uvicorn app:app --reload
+mkdir credentials
 ```
 
-(Check out [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) if you need a MongoDB database.)
+2. Place your Google Cloud service account key file in the credentials directory as `service-account.json`
 
-Now you can load http://localhost:8000/docs in your browser ... but there won't be much to see until you've inserted some data.
+3. Create a `.env` file in the project root with the following content:
+```
+MONGODB_URL=MongoDB connection string
+GOOGLE_CLOUD_PROJECT=your-project-id
+```
 
-If you have any questions or suggestions, check out the [MongoDB Community Forums](https://developer.mongodb.com/community/forums/)!
+## Quick Start
+
+1. Make sure you have completed the environment setup above
+2. Run Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. API service enables at: http://localhost:8000 
+4. Visualize the API service at: http://localhost:8000/docs 
+
+## Folder Structure
+
+### credentials/
+Contains the Google Cloud service account key file (service-account.json)
+
+### DataProcess/
+Dataset and scripts to process data before uploading to MongoDB.
+
+These files need to be 

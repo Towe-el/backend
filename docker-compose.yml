@@ -1,0 +1,12 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=${MONGODB_URL}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - MONGODB_DATABASE=GoEmotion
+      - MONGODB_COLLECTION=vectorizedText
+      - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS}
+    restart: unless-stopped 

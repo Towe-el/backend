@@ -1,6 +1,8 @@
 __pycache__
 .vscode
 .envrc
-toweel-15c16f415397.json
+.env
+toweel-cred.json
 DataProcess/processed data/
-depricated/
+deprecated/
+

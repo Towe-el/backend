@@ -41,7 +41,7 @@ async def search_emotions(query: SearchQuery):
 
     try:
         # Perform semantic search using the new service
-        search_results_raw = await perform_semantic_search(query.text, top_n=3)
+        search_results_raw = await perform_semantic_search(query.text, top_n=5)
         
         if not search_results_raw and isinstance(search_results_raw, list): # Check if it's an empty list from service error
             return SearchResponse(results=[], message="No matching documents found or an error occurred during search.")

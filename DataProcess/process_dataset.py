@@ -76,15 +76,35 @@ print("\nEmotion variety statistics:")
 print(f"Average number of different emotions per text: {avg_emotions:.2f}")
 print(f"Maximum number of different emotions for a text: {max_emotions}")
 
+# Filter out texts with less than 5 words
+print("\nFiltering texts with less than 5 words...")
+filtered_data = []
+deleted_data = []
+
+for item in processed_data:
+    word_count = len(item["text"].split())
+    if word_count >= 5:
+        filtered_data.append(item)
+    else:
+        deleted_data.append(item)
+
+print(f"Removed {len(deleted_data)} texts with less than 5 words")
+print(f"Remaining texts: {len(filtered_data)}")
+
+# Save the deleted texts to a separate file
+print("\nSaving deleted texts...")
+with open('deleted.json', 'w', encoding='utf-8') as f:
+    json.dump(deleted_data, f, ensure_ascii=False, indent=2)
+
 # save the processed data as a JSON file
 print("\nSaving processed data...")
 with open('processed_emotions_with_counts.json', 'w', encoding='utf-8') as f:
-    json.dump(processed_data, f, ensure_ascii=False, indent=2)
+    json.dump(filtered_data, f, ensure_ascii=False, indent=2)
 
 # display some examples, especially examples with multiple emotion labels
 print("\nSample records:")
 # sort by the number of emotion labels, display some examples with different numbers of labels
-samples = sorted(processed_data, key=lambda x: len(x["emotion_label"]), reverse=True)[:5]
+samples = sorted(filtered_data, key=lambda x: len(x["emotion_label"]), reverse=True)[:5]
 for i, record in enumerate(samples):
     print(f"\nRecord {i+1} (with {len(record['emotion_label'])} different emotions):")
     print(json.dumps(record, ensure_ascii=False, indent=2))

@@ -30,10 +30,7 @@ GOOGLE_CLOUD_PROJECT=your-project-id
 
 ## Folder Structure
 
-### credentials/
-Contains the Google Cloud service account key file (service-account.json)
-
 ### DataProcess/
 Dataset and scripts to process data before uploading to MongoDB.
 
-These files need to be 
+These files are independent to the backend services. All of them are tested locally.

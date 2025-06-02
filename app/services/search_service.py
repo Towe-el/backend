@@ -14,10 +14,10 @@ from vertexai.language_models import TextEmbeddingModel
 # --- Constants and Global Initializations ---
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
 CRED_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-LOCATION = "us-central1"
+LOCATION = "europe-west1"
 MODEL_NAME = "text-embedding-005"
 
-MONGO_URI = os.environ.get("MONGODB_URI")
+MONGO_URI = os.getenv("MONGODB_URI")
 DB_NAME = os.getenv("MONGODB_DATABASE", "GoEmotion") # Default to GoEmotion if not set
 COLLECTION_NAME = os.getenv("MONGODB_COLLECTION", "vectorizedText") # Default if not set
 

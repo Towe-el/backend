@@ -2,11 +2,13 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "8080:8080"
     environment:
       - MONGODB_URI=${MONGODB_URI}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - MONGODB_DATABASE=GoEmotion
       - MONGODB_COLLECTION=vectorizedText
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/toweel-cred.json
+    volumes:
+      - ./toweel-cred.json:/app/toweel-cred.json:ro
     restart: unless-stopped 

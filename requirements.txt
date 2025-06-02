@@ -12,7 +12,7 @@ pymongo==4.6.2
 pydantic[email]==2.6.3
 
 # Google Cloud dependencies
-google-cloud-aiplatform==1.38.0
+google-cloud-aiplatform>=1.36.0
 vertexai>=0.0.1
 
 # Data processing

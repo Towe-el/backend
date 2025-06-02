@@ -7,8 +7,7 @@ WORKDIR /app
 # Set default environment variables
 ENV MONGODB_DATABASE=GoEmotion \
     MONGODB_COLLECTION=vectorizedText \
-    PORT=8080 \
-    GOOGLE_CLOUD_PROJECT=toweel
+    PORT=8080
 
 # Install build dependencies and clean up in the same layer
 RUN apt-get update && apt-get install -y --no-install-recommends \

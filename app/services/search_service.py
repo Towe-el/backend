@@ -17,7 +17,7 @@ CRED_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 LOCATION = "us-central1"
 MODEL_NAME = "text-embedding-005"
 
-MONGO_URL = os.environ.get("MONGODB_URL")
+MONGO_URI = os.environ.get("MONGODB_URI")
 DB_NAME = os.getenv("MONGODB_DATABASE", "GoEmotion") # Default to GoEmotion if not set
 COLLECTION_NAME = os.getenv("MONGODB_COLLECTION", "vectorizedText") # Default if not set
 
@@ -31,8 +31,8 @@ print("Initializing Search Service...")
 if not PROJECT_ID:
     print("FATAL ERROR in search_service: GOOGLE_CLOUD_PROJECT env var not set.")
     # In a real app, might raise an exception or have a better config management
-if not MONGO_URL:
-    print("FATAL ERROR in search_service: MONGODB_URL env var not set.")
+if not MONGO_URI:
+    print("FATAL ERROR in search_service: MONGODB_URI env var not set.")
 
 if CRED_PATH and not os.path.exists(CRED_PATH):
     print(f"Warning in search_service: Credential file specified by GOOGLE_APPLICATION_CREDENTIALS not found.")
@@ -63,16 +63,16 @@ except Exception as e_vertex:
 
 # Connect to MongoDB (runs once when module is imported)
 try:
-    if MONGO_URL: # Proceed only if MONGO_URL is set
+    if MONGO_URI: # Proceed only if MONGO_URI is set
         print(f"search_service: Connecting to MongoDB...")
-        mongo_client_service = MongoClient(MONGO_URL, server_api=ServerApi('1'))
+        mongo_client_service = MongoClient(MONGO_URI, server_api=ServerApi('1'))
         mongo_client_service.admin.command('ping') # Verify connection
         print("search_service: MongoDB connection successful.")
         db = mongo_client_service[DB_NAME]
         db_collection_service = db[COLLECTION_NAME]
     else:
         db_collection_service = None # Ensure it's None if not initialized
-        print("search_service: MongoDB not connected due to missing MONGO_URL.")
+        print("search_service: MongoDB not connected due to missing MONGO_URI.")
 except Exception as e_mongo:
     print(f"FATAL ERROR in search_service: Could not connect to MongoDB: {e_mongo}")
     db_collection_service = None # Ensure it's None on failure

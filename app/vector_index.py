@@ -5,7 +5,7 @@ from pymongo.operations import SearchIndexModel
 from pymongo.server_api import ServerApi
 
 # Connect to MongoDB
-client = MongoClient(os.environ["MONGODB_URL"], server_api=ServerApi('1'))
+client = MongoClient(os.environ["MONGODB_URI"], server_api=ServerApi('1'))
 db = client.GoEmotion
 collection = db.vectorizedText
 

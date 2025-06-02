@@ -4,9 +4,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MONGODB_URL=${MONGODB_URL}
+      - MONGODB_URI=${MONGODB_URI}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - MONGODB_DATABASE=GoEmotion
       - MONGODB_COLLECTION=vectorizedText
-      - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
     restart: unless-stopped 

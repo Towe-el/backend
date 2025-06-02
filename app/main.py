@@ -19,7 +19,7 @@ app = FastAPI(
     title="Toweel backend API",
     summary="Test vector search.",
 )
-client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URL"])
+client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
 db = client.GoEmotion
 vectorized_text_collection = db.get_collection("vectorizedText")
 

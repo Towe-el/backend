@@ -150,7 +150,7 @@ class EmotionDetector:
             (similarities.get('high_emotion', 0) * 0.3 + 
              structure_analysis['emotion_word_ratio'] * 0.3 +
              structure_analysis['personal_pronoun_ratio'] * 0.2 +
-             structure_analysis['intensity_indicator_ratio'] * 0.2) * 1.5  # Increase confidence
+             structure_analysis['intensity_indicator_ratio'] * 0.2) * 1.5
         ))
 
         # Lower the threshold for emotion content determination
@@ -278,7 +278,13 @@ class ConversationGuideService:
         """Generate AI response"""
         try:
             # Build prompt
-            prompt = f"""You are a supportive AI assistant. The user said: "{user_input}"
+            json_format = '''
+{
+    "response": "Your single sentence response here",
+    "guidance_suggestion": "Optional example sentence for user to express feelings"
+}
+'''
+            prompt = f'''You are a supportive AI assistant. The user said: "{user_input}"
 
 Based on emotion analysis:
 - Emotion Intensity: {emotion_analysis['emotion_intensity']}
@@ -291,29 +297,56 @@ Your task is to provide a brief, empathetic response with these rules:
 4. Do not give advice unless specifically asked
 5. Focus on acknowledging emotions
 
-Format your response as:
-{{
-    "response": "Your single sentence response here",
-    "guidance_suggestion": "Optional example sentence for user to express feelings"
-}}"""
+Format your response EXACTLY as the following JSON (no additional quotes, backticks, or markdown):
+{json_format}'''
 
-            # Get AI response
-            response = self.client.generate_content(prompt)
-            response_text = response.text
+            # Get AI response using the correct model
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[
+                    "You are a supportive AI assistant focused on providing brief, empathetic responses.",
+                    prompt
+                ]
+            )
+            response_text = response.text.strip()
+
+            # Clean up the response text
+            # Remove any markdown code block indicators
+            response_text = response_text.replace('```json', '').replace('```', '')
+            # Remove any leading/trailing whitespace and quotes
+            response_text = response_text.strip('`\'" \n')
+            
+            logger.info(f"Cleaned response text: {response_text}")
 
             # Parse JSON response
             try:
                 response_dict = json.loads(response_text)
+                # Ensure the response has the required fields
+                if not isinstance(response_dict, dict) or 'response' not in response_dict:
+                    raise json.JSONDecodeError("Invalid response format", response_text, 0)
+                    
                 return {
-                    'response': response_dict.get('response', ''),
-                    'guidance_suggestion': response_dict.get('guidance_suggestion', '')
+                    'response': response_dict.get('response', '').strip(),
+                    'guidance_suggestion': response_dict.get('guidance_suggestion', '').strip()
                 }
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse AI response as JSON: {response_text}")
-                return {
-                    'response': "I understand how you feel.",
-                    'guidance_suggestion': ""
-                }
+                # Try to extract response and guidance_suggestion using regex
+                import re
+                try:
+                    response_match = re.search(r'"response":\s*"([^"]+)"', response_text)
+                    guidance_match = re.search(r'"guidance_suggestion":\s*"([^"]+)"', response_text)
+                    
+                    return {
+                        'response': response_match.group(1) if response_match else "I understand how you feel.",
+                        'guidance_suggestion': guidance_match.group(1) if guidance_match else ""
+                    }
+                except Exception as regex_error:
+                    logger.error(f"Regex extraction failed: {str(regex_error)}")
+                    return {
+                        'response': "I understand how you feel.",
+                        'guidance_suggestion': ""
+                    }
 
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}")

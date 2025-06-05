@@ -3,6 +3,8 @@ import sys
 import re
 import numpy as np
 from typing import List, Optional
+from functools import lru_cache
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
@@ -10,6 +12,7 @@ from pymongo.server_api import ServerApi
 # Google Cloud Vertex AI setup
 from google.cloud import aiplatform
 from vertexai.language_models import TextEmbeddingModel
+from google.api_core import exceptions as google_exceptions
 
 # --- Constants and Global Initializations ---
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
@@ -105,11 +108,15 @@ def split_into_sentences_service(paragraph: str) -> list[str]:
         result.append(current_sentence.strip())
     return [s for s in result if s]
 
-def _get_vertex_embedding_service(text: str) -> list[float]:
+def _get_vertex_embedding_service_core(text: str) -> list[float]:
+    """
+    Core function to get text embedding from Vertex AI.
+    This function is wrapped by a retry and cache mechanism.
+    """
     global text_embedding_model_service
     if text_embedding_model_service is None:
         print("Error in _get_vertex_embedding_service: Text embedding model not available.")
-        return [] 
+        raise ValueError("Text embedding model not available.")
         
     if not text.strip():
         return [] 
@@ -122,12 +129,52 @@ def _get_vertex_embedding_service(text: str) -> list[float]:
             return raw_embedding
         return []
     except Exception as e:
-        print(f"Error in _get_vertex_embedding_service calling Vertex AI for text '{text[:50]}...': {e}")
+        print(f"Error in _get_vertex_embedding_service_core calling Vertex AI for text '{text[:50]}...': {e}")
+        raise e
+
+@lru_cache(maxsize=1024)
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=6),
+    retry=retry_if_exception_type((
+        google_exceptions.ResourceExhausted,
+        google_exceptions.ServiceUnavailable,
+        google_exceptions.DeadlineExceeded,
+        ConnectionError
+    )),
+    reraise=True
+)
+def _get_vertex_embedding_service(text: str) -> list[float]:
+    """
+    Gets a text embedding from Vertex AI with caching and retries.
+    Only retries on specific Google API exceptions and connection errors.
+    Returns an empty list if embedding fails after all retries.
+    """
+    if not text.strip():
         return []
+    try:
+        return _get_vertex_embedding_service_core(text)
+    except (google_exceptions.ResourceExhausted,
+            google_exceptions.ServiceUnavailable,
+            google_exceptions.DeadlineExceeded,
+            ConnectionError) as e:
+        print(f"Failed to get embedding for '{text[:50]}...' after all retries: {e}")
+        raise e
+    except ValueError as e:
+        print(f"Error in _get_vertex_embedding_service: {e}")
+        raise e
+    except Exception as e:
+        print(f"Unexpected error while getting embedding: {e}")
+        raise e
 
 def _get_weighted_average_embedding_service(texts: list[str], weights: Optional[list[float]] = None) -> list[float]:
+    """
+    Calculate weighted average of embeddings for multiple texts.
+    Uses caching and retry-enabled embedding service.
+    """
     if not texts:
         return []
+    
     embeddings_list = []
     for text_item in texts:
         emb = _get_vertex_embedding_service(text_item)
@@ -138,14 +185,13 @@ def _get_weighted_average_embedding_service(texts: list[str], weights: Optional[
         return []
 
     embeddings_np = np.array(embeddings_list)
-    # Basic check for consistent dimensions if multiple embeddings were generated
     if embeddings_np.ndim > 1 and embeddings_np.shape[0] > 1:
         first_dim_shape = embeddings_np[0].shape
         for i in range(1, embeddings_np.shape[0]):
             if embeddings_np[i].shape != first_dim_shape:
                 print(f"Error in _get_weighted_average_embedding_service: Inconsistent embedding dimensions found.")
-                return [] # Cannot average inconsistent dimensions
-    elif embeddings_np.ndim == 0 or (embeddings_np.ndim ==1 and len(texts) > 1) :
+                return []
+    elif embeddings_np.ndim == 0 or (embeddings_np.ndim == 1 and len(texts) > 1):
         print(f"Error in _get_weighted_average_embedding_service: Unexpected embedding array structure.")
         return []
 
@@ -156,18 +202,17 @@ def _get_weighted_average_embedding_service(texts: list[str], weights: Optional[
         else:
             weights_np_calc = np.array(weights)
             if np.sum(weights_np_calc) == 0:
-                weights_np_calc = None 
+                weights_np_calc = None
             else:
                 weights_np_calc = weights_np_calc / np.sum(weights_np_calc)
     
     if weights_np_calc is not None and embeddings_np.size > 0:
-        # Ensure embeddings_np is treated as a 2D array for broadcasting with weights
-        if embeddings_np.ndim == 1: # Single embedding, but weights provided (unusual but handle)
-             if len(weights_np_calc) == 1:
-                 weighted_avg = embeddings_np * weights_np_calc[0] # Element-wise if weights_np_calc is scalar
-             else: # Should not happen if len(weights) == len(embeddings_np) check passes with single embedding
-                 print("Error: Weight logic error for single embedding.")
-                 return []
+        if embeddings_np.ndim == 1:
+            if len(weights_np_calc) == 1:
+                weighted_avg = embeddings_np * weights_np_calc[0]
+            else:
+                print("Error: Weight logic error for single embedding.")
+                return []
         else:
             weighted_avg = np.sum(embeddings_np * weights_np_calc[:, np.newaxis], axis=0)
     elif embeddings_np.size > 0:
@@ -224,3 +269,62 @@ async def perform_semantic_search(query_text: str, top_n: int = 3) -> List[dict]
     except Exception as e:
         print(f"Error in perform_semantic_search during DB aggregation: {e}")
         return [] 
+
+def _initialize_vertex_ai():
+    """Initialize Vertex AI SDK and load text embedding model."""
+    global text_embedding_model_service
+    try:
+        print("search_service: Initializing Vertex AI SDK (Project: {}, Location: {})...".format(
+            os.getenv("GOOGLE_CLOUD_PROJECT", "unknown"),
+            os.getenv("VERTEX_AI_LOCATION", "europe-west1")
+        ))
+        aiplatform.init(
+            project=os.getenv("GOOGLE_CLOUD_PROJECT"),
+            location=os.getenv("VERTEX_AI_LOCATION", "europe-west1")
+        )
+        print("search_service: Vertex AI SDK initialized.")
+
+        print("search_service: Loading text embedding model: text-embedding-005 (target 256-dim)...")
+        try:
+            text_embedding_model_service = TextEmbeddingModel.from_pretrained("text-embedding-005", output_dimensionality=256)
+        except Exception as e:
+            print(f"search_service: Failed to load model with output_dimensionality=256: {e}. Retrying without...")
+            text_embedding_model_service = TextEmbeddingModel.from_pretrained("text-embedding-005")
+        print("search_service: Text embedding model loaded (specified 256-dim).")
+        return True
+    except Exception as e:
+        print(f"FATAL ERROR in search_service: Failed to initialize Vertex AI or load model:\n{e}")
+        text_embedding_model_service = None
+        return False
+
+def _initialize_mongodb():
+    """Initialize MongoDB connection."""
+    global mongodb_collection
+    try:
+        print("search_service: Connecting to MongoDB...")
+        client = MongoClient(os.getenv("MONGODB_URI"), serverSelectionTimeoutMS=30000)
+        db = client[os.getenv("MONGODB_DATABASE")]
+        mongodb_collection = db[os.getenv("MONGODB_COLLECTION")]
+        return True
+    except Exception as e:
+        print(f"FATAL ERROR in search_service: Could not connect to MongoDB: {e}")
+        mongodb_collection = None
+        return False
+
+def initialize_search_service():
+    """Initialize all required services."""
+    print("Initializing Search Service...")
+    vertex_ai_ok = _initialize_vertex_ai()
+    mongodb_ok = _initialize_mongodb()
+
+    if not vertex_ai_ok and not mongodb_ok:
+        print("Search Service initialized WITH ERRORS: Vertex AI model and MongoDB collection NOT available.")
+    elif not vertex_ai_ok:
+        print("Search Service initialized WITH ERRORS: Vertex AI model NOT available.")
+    elif not mongodb_ok:
+        print("Search Service initialized WITH ERRORS: MongoDB collection NOT available.")
+    else:
+        print("Search Service initialized successfully.")
+
+# Initialize services when module is imported
+initialize_search_service() 

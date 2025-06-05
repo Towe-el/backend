@@ -5,16 +5,23 @@
 #    pip-compile --strip-extras requirements.in
 #
 # Core dependencies
-fastapi==0.110.0
-uvicorn==0.28.0
-motor==3.3.1
-pymongo==4.6.2
-pydantic[email]==2.6.3
+fastapi>=0.115.0
+uvicorn>=0.15.0
+python-multipart>=0.0.5
+pydantic>=2.0.0
+pytest
 
 # Google Cloud dependencies
-google-cloud-aiplatform>=1.36.0
+google-cloud-aiplatform>=1.25.0
+google-genai>=0.1.0
 vertexai>=0.0.1
+tenacity==9.1.2
 
 # Data processing
-numpy==1.26.4
+numpy>=1.21.0
 pandas>=1.5.0
+python-dotenv>=0.19.0
+
+# MongoDB dependencies
+motor>=2.5.1
+pymongo>=3.12.0

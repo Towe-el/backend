@@ -1,17 +1,12 @@
 import os
 import numpy as np
-from typing import List, Dict, Optional, Any
+from typing import List, Dict
 from datetime import datetime
 from google import genai
-from google.genai import types
 from .search_service import (
     _get_vertex_embedding_service,
     split_into_sentences_service
 )
-import json
-import logging
-
-logger = logging.getLogger(__name__)
 
 class EmotionDetector:
     def __init__(self):
@@ -133,28 +128,31 @@ class EmotionDetector:
         # Analyze sentence structure
         structure_analysis = self._analyze_sentence_structure(text)
 
-        # Overall score - adjust weights and calculation method
+        # Overall score - adjust weights to be more lenient
         emotion_score = (
-            similarities.get('high_emotion', 0) * 0.3 +  # Lower the weight of high emotion similarity
-            (1 - similarities.get('neutral', 0)) * 0.2 +  # Lower the weight of non-neutral degree
-            structure_analysis['personal_pronoun_ratio'] * 0.2 +  # Increase the weight of personal pronouns
-            structure_analysis['emotion_word_ratio'] * 0.2 +  # Increase the weight of emotion words
-            structure_analysis['intensity_indicator_ratio'] * 0.1  # Add weight to intensity indicators
+            similarities.get('high_emotion', 0) * 0.25 +  # Reduced weight of high emotion similarity
+            (1 - similarities.get('neutral', 0)) * 0.25 +  # Increased weight of non-neutral degree
+            structure_analysis['personal_pronoun_ratio'] * 0.2 +  # Keep personal pronouns weight
+            structure_analysis['emotion_word_ratio'] * 0.2 +  # Keep emotion words weight
+            structure_analysis['intensity_indicator_ratio'] * 0.1  # Keep intensity indicators weight
         )
 
-        # Adjust emotion intensity calculation
-        base_intensity = min(1.0, max(0.0, emotion_score * 1.5))  # Increase emotion intensity
+        # Adjust emotion intensity calculation - more lenient scaling
+        base_intensity = min(1.0, max(0.0, emotion_score * 2.0))  # Increased multiplier from 1.5 to 2.0
         
-        # Adjust confidence calculation
+        # Adjust confidence calculation - more lenient
         confidence = min(1.0, max(0.0, 
-            (similarities.get('high_emotion', 0) * 0.3 + 
-             structure_analysis['emotion_word_ratio'] * 0.3 +
-             structure_analysis['personal_pronoun_ratio'] * 0.2 +
-             structure_analysis['intensity_indicator_ratio'] * 0.2) * 1.5
+            (similarities.get('high_emotion', 0) * 0.25 + 
+             structure_analysis['emotion_word_ratio'] * 0.35 +  # Increased weight for emotion words
+             structure_analysis['personal_pronoun_ratio'] * 0.25 +  # Increased weight for personal pronouns
+             structure_analysis['intensity_indicator_ratio'] * 0.15) * 2.0  # Increased multiplier
         ))
 
-        # Lower the threshold for emotion content determination
-        has_emotion = base_intensity > 0.2  # From 0.3 to 0.2
+        # Lower thresholds for emotion content determination
+        has_emotion = base_intensity > 0.15  # Lowered from 0.2
+
+        # More lenient needs_more_detail threshold
+        needs_more_detail = base_intensity < 0.15 or confidence < 0.25  # Lowered from 0.2/0.3
 
         return {
             'has_emotion_content': has_emotion,
@@ -163,25 +161,9 @@ class EmotionDetector:
             'analysis_details': {
                 'similarities': similarities,
                 'structure_analysis': structure_analysis,
-                'needs_more_detail': base_intensity < 0.2 or confidence < 0.3
+                'needs_more_detail': needs_more_detail
             }
         }
-
-    def get_emotion_guidance(self, analysis_result: Dict) -> str:
-        """Based on the analysis result, generate a guidance suggestion"""
-        if not analysis_result['has_emotion_content']:
-            if analysis_result['emotion_intensity'] < 0.2:
-                return "Could you share more about how you're feeling?"
-            else:
-                return "I sense some emotions in your words. Could you tell me more about that?"
-        
-        if analysis_result['confidence'] < 0.3:
-            return "What specific situation made you feel this way?"
-        
-        if analysis_result['analysis_details']['structure_analysis']['personal_pronoun_ratio'] < 0.1:
-            return "How does this situation affect you personally?"
-
-        return "Could you elaborate more on these feelings?"
 
 class ConversationGuideService:
     def __init__(self):
@@ -210,39 +192,26 @@ class ConversationGuideService:
                 analysis, 
                 context
             )
-
-            # 4. generate concise response
-            concise_response = self.generate_ai_response(
-                user_input,
-                analysis["emotion_analysis"]
-            )
             
-            # 5. update context
+            # 4. update context
             self.context_manager.update_context(user_input, guide_response)
             
             return {
-                "guide_response": guide_response,
-                "concise_response": concise_response,
+                "guidance_response": guide_response,
                 "analysis": analysis,
                 "needs_more_input": analysis["needs_more_detail"]
             }
         except Exception as e:
             print(f"Error in process_user_input: {str(e)}")
             return {
-                "guide_response": "I apologize, but I'm having trouble processing your input right now. Could you try expressing your thoughts in a different way?",
-                "concise_response": {
-                    "response": "I understand how you feel.",
-                    "guidance_suggestion": ""
-                },
+                "guidance_response": "I apologize, but I'm having trouble processing your input right now. Could you try expressing your thoughts in a different way?",
                 "analysis": {
                     "emotion_analysis": {
                         "has_emotion_content": False,
                         "emotion_intensity": 0.0,
-                        "confidence": 0.0,
-                        "analysis_details": {"needs_more_detail": True}
+                        "confidence": 0.0
                     },
-                    "needs_more_detail": True,
-                    "guidance_suggestion": "Could you try expressing your thoughts in a different way?"
+                    "needs_more_detail": True
                 },
                 "needs_more_input": True
             }
@@ -274,87 +243,6 @@ class ConversationGuideService:
             print(f"Error generating AI guide response: {e}")
             return "I apologize, but I'm having trouble providing a response right now. Could you try expressing your thoughts in a different way?"
 
-    def generate_ai_response(self, user_input: str, emotion_analysis: Dict) -> Dict[str, Any]:
-        """Generate AI response"""
-        try:
-            # Build prompt
-            json_format = '''
-{
-    "response": "Your single sentence response here",
-    "guidance_suggestion": "Optional example sentence for user to express feelings"
-}
-'''
-            prompt = f'''You are a supportive AI assistant. The user said: "{user_input}"
-
-Based on emotion analysis:
-- Emotion Intensity: {emotion_analysis['emotion_intensity']}
-- Confidence: {emotion_analysis['confidence']}
-
-Your task is to provide a brief, empathetic response with these rules:
-1. Keep your main response to a single sentence that shows understanding and support
-2. If needed, provide ONE example sentence that the user could use to express their feelings more clearly
-3. Be direct and concise
-4. Do not give advice unless specifically asked
-5. Focus on acknowledging emotions
-
-Format your response EXACTLY as the following JSON (no additional quotes, backticks, or markdown):
-{json_format}'''
-
-            # Get AI response using the correct model
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=[
-                    "You are a supportive AI assistant focused on providing brief, empathetic responses.",
-                    prompt
-                ]
-            )
-            response_text = response.text.strip()
-
-            # Clean up the response text
-            # Remove any markdown code block indicators
-            response_text = response_text.replace('```json', '').replace('```', '')
-            # Remove any leading/trailing whitespace and quotes
-            response_text = response_text.strip('`\'" \n')
-            
-            logger.info(f"Cleaned response text: {response_text}")
-
-            # Parse JSON response
-            try:
-                response_dict = json.loads(response_text)
-                # Ensure the response has the required fields
-                if not isinstance(response_dict, dict) or 'response' not in response_dict:
-                    raise json.JSONDecodeError("Invalid response format", response_text, 0)
-                    
-                return {
-                    'response': response_dict.get('response', '').strip(),
-                    'guidance_suggestion': response_dict.get('guidance_suggestion', '').strip()
-                }
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse AI response as JSON: {response_text}")
-                # Try to extract response and guidance_suggestion using regex
-                import re
-                try:
-                    response_match = re.search(r'"response":\s*"([^"]+)"', response_text)
-                    guidance_match = re.search(r'"guidance_suggestion":\s*"([^"]+)"', response_text)
-                    
-                    return {
-                        'response': response_match.group(1) if response_match else "I understand how you feel.",
-                        'guidance_suggestion': guidance_match.group(1) if guidance_match else ""
-                    }
-                except Exception as regex_error:
-                    logger.error(f"Regex extraction failed: {str(regex_error)}")
-                    return {
-                        'response': "I understand how you feel.",
-                        'guidance_suggestion': ""
-                    }
-
-        except Exception as e:
-            logger.error(f"Error generating AI response: {str(e)}")
-            return {
-                'response': "I understand how you feel.",
-                'guidance_suggestion': ""
-            }
-
 class InputAnalyzer:
     def __init__(self):
         self.emotion_detector = EmotionDetector()
@@ -366,18 +254,17 @@ class InputAnalyzer:
         # Perform emotion analysis
         emotion_analysis = self.emotion_detector.analyze_emotion_content(text)
         
-        # Get guidance suggestion
-        guidance_suggestion = self.emotion_detector.get_emotion_guidance(emotion_analysis)
+        # More lenient criteria for needs_more_detail
+        needs_more_detail = (
+            len(sentences) < 2 or  # Reduced from 3 to 2
+            emotion_analysis['analysis_details']['needs_more_detail']
+        )
         
         # Merge analysis results
         return {
             "sentence_count": len(sentences),
             "emotion_analysis": emotion_analysis,
-            "needs_more_detail": (
-                len(sentences) < 3 or 
-                emotion_analysis['analysis_details']['needs_more_detail']
-            ),
-            "guidance_suggestion": guidance_suggestion
+            "needs_more_detail": needs_more_detail
         }
 
 class PromptGenerator:
@@ -402,12 +289,23 @@ Based on the analysis:
 - Needs more detail: {"Yes" if needs_detail else "No"}
 
 Please provide a response that:
-1. Acknowledges their current emotional state
+1. Acknowledges their current emotional state in 1 or 2 sentences
 2. Shows empathy and understanding
-3. {"Encourages deeper emotional expression" if needs_detail else "Explores the implications of their feelings"}
-4. Offers gentle guidance for reflection
+3. {'''If they need more detail, provide:
+   a) 2-3 specific follow-up questions from this list:
+      - "What happened that made you feel this way?"
+      - "When did you start feeling like this?"
+      - "How does this feeling show up in your body?"
+      - "What thoughts come up with this feeling?"
+      - "Did something specific trigger this emotion?"
+      - "How long have you been feeling this way?"
+   b) A set of emotion words they might relate to, like:
+      - For sadness: "disappointed", "lonely", "hopeless", "hurt"
+      - For anger: "frustrated", "irritated", "furious", "resentful"
+      - For anxiety: "nervous", "overwhelmed", "worried", "tense"
+      Choose words that best match their expressed emotion.''' if needs_detail else "Acknowledge that they've expressed themselves clearly"}
 
-Keep the response natural, supportive, and focused on their emotional experience."""
+Keep the response concise and supportive. If suggesting words, present them as options to consider, not as declarations about their state."""
 
         return prompt
 
@@ -416,10 +314,10 @@ class ContextManager:
         self.conversation_history = []
         self.max_history = 5
 
-    def update_context(self, user_input: str, ai_response: str):
+    def update_context(self, user_input: str, guidance_response: str):
         self.conversation_history.append({
             "user_input": user_input,
-            "ai_response": ai_response,
+            "guidance_response": guidance_response,
             "timestamp": datetime.now()
         })
         

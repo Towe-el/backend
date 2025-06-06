@@ -2,7 +2,7 @@ import os
 import sys
 import re
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Dict
 from functools import lru_cache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -13,6 +13,8 @@ from pymongo.server_api import ServerApi
 from google.cloud import aiplatform
 from vertexai.language_models import TextEmbeddingModel
 from google.api_core import exceptions as google_exceptions
+from google.api_core.retry import Retry
+from .rag_service import RAGProcessor
 
 # --- Constants and Global Initializations ---
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
@@ -27,6 +29,7 @@ COLLECTION_NAME = os.getenv("MONGODB_COLLECTION", "vectorizedText") # Default if
 # --- Global variables for initialized clients/models ---
 db_collection_service = None
 text_embedding_model_service = None
+rag_processor = RAGProcessor()
 
 print("Initializing Search Service...")
 
@@ -223,26 +226,41 @@ def _get_weighted_average_embedding_service(texts: list[str], weights: Optional[
     return weighted_avg.tolist()
 
 # --- Main Search Function ---
-async def perform_semantic_search(query_text: str, top_n: int = 3) -> List[dict]:
+async def perform_semantic_search(query_text: str, top_n: int = 10) -> Dict:
     global db_collection_service
     if db_collection_service is None:
         print("Error in perform_semantic_search: MongoDB collection not available.")
-        return [] 
+        return {
+            "results": [],
+            "rag_analysis": None
+        }
     if text_embedding_model_service is None:
         print("Error in perform_semantic_search: Text embedding model not available.")
-        return []
+        return {
+            "results": [],
+            "rag_analysis": None
+        }
 
     if not query_text.strip():
-        return []
+        return {
+            "results": [],
+            "rag_analysis": None
+        }
 
     sentences = split_into_sentences_service(query_text)
     if not sentences:
-        return []
+        return {
+            "results": [],
+            "rag_analysis": None
+        }
 
     avg_query_vector = _get_weighted_average_embedding_service(sentences, weights=None)
     if not avg_query_vector or len(avg_query_vector) != 256:
         print(f"Error in perform_semantic_search: Failed to generate valid 256-dim query vector. Dim: {len(avg_query_vector) if avg_query_vector else 'None'}")
-        return []
+        return {
+            "results": [],
+            "rag_analysis": None
+        }
         
     pipeline = [
         {
@@ -265,10 +283,20 @@ async def perform_semantic_search(query_text: str, top_n: int = 3) -> List[dict]
     ]
     try:
         results = list(db_collection_service.aggregate(pipeline))
-        return results
+        
+        # Process results with RAG
+        rag_analysis = rag_processor.process_search_results(results)
+        
+        return {
+            "results": results,
+            "rag_analysis": rag_analysis
+        }
     except Exception as e:
         print(f"Error in perform_semantic_search during DB aggregation: {e}")
-        return [] 
+        return {
+            "results": [],
+            "rag_analysis": None
+        }
 
 def _initialize_vertex_ai():
     """Initialize Vertex AI SDK and load text embedding model."""

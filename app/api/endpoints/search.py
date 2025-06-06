@@ -32,7 +32,15 @@ class EmotionAnalysis(BaseModel):
     emotion_intensity: float
     confidence: float
     needs_more_detail: bool
-    guidance_suggestion: Optional[str]
+
+class EmotionStat(BaseModel):
+    label: str
+    count: int
+    percentage: float
+
+class RAGAnalysis(BaseModel):
+    emotion_stats: List[EmotionStat]
+    example_responses: Dict[str, str]
 
 class SearchResponse(BaseModel):
     """
@@ -41,8 +49,8 @@ class SearchResponse(BaseModel):
     results: List[SearchResultItem]
     message: Optional[str]
     emotion_analysis: Optional[EmotionAnalysis]
-    ai_response: Optional[str]
-    concise_response: Optional[Dict[str, str]]
+    guidance_response: Optional[str]
+    rag_analysis: Optional[RAGAnalysis]
 
 @router.post("/", response_model=SearchResponse)
 async def search_emotions(query: SearchQuery):
@@ -56,8 +64,10 @@ async def search_emotions(query: SearchQuery):
         # Initialize conversation guide service
         guide_service = ConversationGuideService()
         
-        # Perform semantic search
-        search_results_raw = await perform_semantic_search(query.text, top_n=10)
+        # Perform semantic search with RAG
+        search_result = await perform_semantic_search(query.text, top_n=10)
+        search_results_raw = search_result["results"]
+        rag_analysis = search_result["rag_analysis"]
         
         # Get AI analysis and response
         guide_result = await guide_service.process_user_input(query.text)
@@ -81,7 +91,6 @@ async def search_emotions(query: SearchQuery):
                 emotion_intensity=analysis["emotion_analysis"]["emotion_intensity"],
                 confidence=analysis["emotion_analysis"]["confidence"],
                 needs_more_detail=analysis.get("needs_more_detail", False),
-                guidance_suggestion=analysis.get("guidance_suggestion")
             )
             
         # Prepare the combined response
@@ -90,10 +99,10 @@ async def search_emotions(query: SearchQuery):
             results=pydantic_results,
             message=message,
             emotion_analysis=emotion_analysis,
-            ai_response=guide_result.get("guide_response") if guide_result else None,
-            concise_response=guide_result.get("concise_response") if guide_result else None
+            guidance_response=guide_result.get("guidance_response") if guide_result else None,
+            rag_analysis=RAGAnalysis(**rag_analysis) if rag_analysis else None
         )
-
+        
     except Exception as e:
         print(f"Unexpected error in /search endpoint: {str(e)} - Query: {query.text}")
         raise HTTPException(

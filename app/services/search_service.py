@@ -187,7 +187,10 @@ def _get_weighted_average_embedding_service(texts: list[str], weights: Optional[
     if not embeddings_list:
         return []
 
+    # Convert all embeddings to numpy arrays for calculation
     embeddings_np = np.array(embeddings_list)
+    
+    # Check dimensions
     if embeddings_np.ndim > 1 and embeddings_np.shape[0] > 1:
         first_dim_shape = embeddings_np[0].shape
         for i in range(1, embeddings_np.shape[0]):
@@ -198,32 +201,27 @@ def _get_weighted_average_embedding_service(texts: list[str], weights: Optional[
         print(f"Error in _get_weighted_average_embedding_service: Unexpected embedding array structure.")
         return []
 
-    weights_np_calc = None
+    # Calculate weights
     if weights:
         if len(weights) != len(embeddings_np):
             print("Warning in _get_weighted_average_embedding_service: Mismatched weights and texts. Using simple average.")
+            weights_np = np.ones(len(embeddings_np)) / len(embeddings_np)
         else:
-            weights_np_calc = np.array(weights)
-            if np.sum(weights_np_calc) == 0:
-                weights_np_calc = None
+            weights_np = np.array(weights)
+            if np.sum(weights_np) == 0:
+                weights_np = np.ones(len(embeddings_np)) / len(embeddings_np)
             else:
-                weights_np_calc = weights_np_calc / np.sum(weights_np_calc)
-    
-    if weights_np_calc is not None and embeddings_np.size > 0:
-        if embeddings_np.ndim == 1:
-            if len(weights_np_calc) == 1:
-                weighted_avg = embeddings_np * weights_np_calc[0]
-            else:
-                print("Error: Weight logic error for single embedding.")
-                return []
-        else:
-            weighted_avg = np.sum(embeddings_np * weights_np_calc[:, np.newaxis], axis=0)
-    elif embeddings_np.size > 0:
-        weighted_avg = np.mean(embeddings_np, axis=0)
+                weights_np = weights_np / np.sum(weights_np)
     else:
+        weights_np = np.ones(len(embeddings_np)) / len(embeddings_np)
+
+    # Calculate weighted average
+    try:
+        weighted_avg = np.average(embeddings_np, axis=0, weights=weights_np)
+        return weighted_avg.tolist()  # Convert to list for MongoDB compatibility
+    except Exception as e:
+        print(f"Error calculating weighted average: {e}")
         return []
-        
-    return weighted_avg.tolist()
 
 # --- Main Search Function ---
 async def perform_semantic_search(query_text: str, top_n: int = 10) -> Dict:
@@ -268,7 +266,7 @@ async def perform_semantic_search(query_text: str, top_n: int = 10) -> Dict:
                 "index": "vector_index", 
                 "queryVector": avg_query_vector,
                 "path": "vector",       
-                "numCandidates": 100,   
+                "numCandidates": 200,   
                 "limit": top_n          
             }
         },
@@ -281,11 +279,17 @@ async def perform_semantic_search(query_text: str, top_n: int = 10) -> Dict:
             }
         }
     ]
+    
     try:
         results = list(db_collection_service.aggregate(pipeline))
         
-        # Process results with RAG
-        rag_analysis = rag_processor.process_search_results(results)
+        # Process results with RAG only if we have search results
+        rag_analysis = None
+        if results:
+            try:
+                rag_analysis = rag_processor.process_search_results(results, query_text)
+            except Exception as e:
+                print(f"Error in RAG processing: {e}")
         
         return {
             "results": results,

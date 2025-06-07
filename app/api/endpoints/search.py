@@ -65,7 +65,7 @@ async def search_emotions(query: SearchQuery):
         guide_service = ConversationGuideService()
         
         # Perform semantic search with RAG
-        search_result = await perform_semantic_search(query.text, top_n=10)
+        search_result = await perform_semantic_search(query.text, top_n=20)
         search_results_raw = search_result["results"]
         rag_analysis = search_result["rag_analysis"]
         

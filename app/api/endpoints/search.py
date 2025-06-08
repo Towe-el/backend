@@ -39,9 +39,23 @@ class EmotionStat(BaseModel):
     count: int
     percentage: float
 
+class EnrichedEmotionStat(BaseModel):
+    """
+    Model for a single enriched emotion stat, including definition, quote, and analysis.
+    """
+    label: str
+    count: int
+    percentage: float
+    definition: str
+    quote: str
+    analysis: str
+
 class RAGAnalysis(BaseModel):
-    emotion_stats: List[EmotionStat]
-    example_responses: Dict[str, str]
+    """
+    The main model for the entire RAG analysis package.
+    """
+    enriched_emotion_stats: List[EnrichedEmotionStat]
+    summary_report: str
 
 class SearchResponse(BaseModel):
     """
@@ -69,7 +83,7 @@ async def search_emotions(query: SearchQuery):
         # run sync search logic in thread pool using asyncio.to_thread
         search_result = await asyncio.to_thread(perform_semantic_search, query.text, 30)
         search_results_raw = search_result["results"]
-        rag_analysis = search_result["rag_analysis"]
+        rag_analysis_data = search_result.get("rag_analysis")
         
         # Get AI analysis and response
         guide_result = await guide_service.process_user_input(query.text)
@@ -102,7 +116,7 @@ async def search_emotions(query: SearchQuery):
             message=message,
             emotion_analysis=emotion_analysis,
             guidance_response=guide_result.get("guidance_response") if guide_result else None,
-            rag_analysis=RAGAnalysis(**rag_analysis) if rag_analysis else None
+            rag_analysis=RAGAnalysis(**rag_analysis_data) if rag_analysis_data else None
         )
         
     except Exception as e:

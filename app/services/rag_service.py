@@ -5,6 +5,38 @@ import os
 import ast # Use ast for safe literal evaluation
 import numpy as np
 
+# Official emotion definitions, to be provided to the user.
+EMOTION_DEFINITIONS = {
+    "admiration": "Admiration is the feeling of finding something impressive or worthy of respect.",
+    "amusement": "Amusement is the feeling of finding something funny or being entertained.",
+    "anger": "Anger is a strong feeling of displeasure or antagonism.",
+    "annoyance": "Annoyance is a feeling of mild anger or irritation.",
+    "approval": "Approval is the feeling of having or expressing a favorable opinion.",
+    "caring": "Caring is the act of displaying kindness and concern for others.",
+    "confusion": "Confusion is a state of uncertainty or a lack of understanding.",
+    "curiosity": "Curiosity is a strong desire to know or learn something.",
+    "desire": "Desire is a strong feeling of wanting something or wishing for something to happen.",
+    "disappointment": "Disappointment is a feeling of sadness or displeasure caused by the nonfulfillment of one's hopes or expectations.",
+    "disapproval": "Disapproval is the feeling of having or expressing an unfavorable opinion.",
+    "disgust": "Disgust is a feeling of revulsion or strong disapproval aroused by something unpleasant or offensive.",
+    "embarrassment": "Embarrassment is a feeling of self-consciousness, shame, or awkwardness.",
+    "excitement": "Excitement is a feeling of great enthusiasm and eagerness.",
+    "fear": "Fear is the feeling of being afraid or worried.",
+    "gratitude": "Gratitude is a feeling of thankfulness and appreciation.",
+    "grief": "Grief is intense sorrow, especially when caused by someone's death.",
+    "joy": "Joy is a feeling of great pleasure and happiness.",
+    "love": "Love is a strong positive emotion of regard and affection.",
+    "nervousness": "Nervousness is a feeling of apprehension, worry, or anxiety.",
+    "optimism": "Optimism is a feeling of hopefulness and confidence about the future or the success of something.",
+    "pride": "Pride is a feeling of pleasure or satisfaction due to one's own achievements or the achievements of those one is closely associated with.",
+    "realization": "Realization is the act of becoming aware of something.",
+    "relief": "Relief is a feeling of reassurance and relaxation following release from anxiety or distress.",
+    "remorse": "Remorse is a feeling of regret or guilt.",
+    "sadness": "Sadness is a feeling of emotional pain or sorrow.",
+    "surprise": "Surprise is a feeling of being astonished or startled by something unexpected.",
+    "neutral": "Neutral is a state of lacking strong emotional content."
+}
+
 # Valence-Arousal (VA) model, meticulously re-calibrated based on UI/UX and a High/Medium/Low intensity principle.
 # V: Valence (Pleasure), A: Arousal (Activation)
 EMOTION_VA_MAP = {
@@ -89,53 +121,146 @@ class RAGProcessor:
             return None
 
     def process_search_results(self, search_results: List[Dict], user_input: str) -> Dict:
-        """Process search results to get emotion statistics and generate empathetic responses"""
+        """
+        Processes search results to generate a rich, analytical, and supportive response.
+        """
+        # 1. Calculate the top 3 relevant emotions based on the search results.
+        top_emotions_stats = self._calculate_emotion_stats(search_results, user_input)
+        if not top_emotions_stats:
+            return { "enriched_emotion_stats": [], "summary_report": "" }
+
+        # 2. For each of the top emotions, generate enriched details.
+        enriched_emotion_stats = []
+        for emotion_stat in top_emotions_stats:
+            enriched_data = self._generate_enriched_emotion_data(
+                emotion_stat, 
+                user_input, 
+                search_results
+            )
+            enriched_emotion_stats.append(enriched_data)
+
+        # 3. Generate a final summary report based on all enriched data.
+        summary_report = self._generate_summary_report(enriched_emotion_stats, user_input)
+
+        return {
+            "enriched_emotion_stats": enriched_emotion_stats,
+            "summary_report": summary_report
+        }
+
+    def _generate_enriched_emotion_data(self, emotion_stat: Dict, user_input: str, search_results: List[Dict]) -> Dict:
+        """
+        Generates the detailed analysis for a single emotion.
+        """
+        label = emotion_stat["label"]
+        
+        # 1. Get Definition
+        definition = EMOTION_DEFINITIONS.get(label, "No definition available.")
+
+        # 2. Get Quote (formerly example_response)
+        quote = self._generate_quote(label, search_results)
+        
+        # 3. Get Analysis
+        analysis = self._generate_analysis(label, definition, user_input)
+        
+        # 4. Check for high-intensity negative emotions to add advice
+        query_emotion_center = self._get_query_emotion_profile(user_input)
+        if query_emotion_center is not None:
+            is_negative = query_emotion_center[0] < -0.1
+            intensity = np.linalg.norm(query_emotion_center)
+            if is_negative and intensity > 0.75: # High intensity negative emotion
+                analysis += " It's important to acknowledge the weight of these feelings. If they persist or feel overwhelming, speaking with a mental health professional can provide valuable support and guidance."
+
+        return {
+            "label": label,
+            "count": emotion_stat["count"],
+            "percentage": emotion_stat["percentage"],
+            "definition": definition,
+            "quote": quote,
+            "analysis": analysis
+        }
+
+    def _generate_quote(self, emotion: str, search_results: List[Dict]) -> str:
+        """
+        Generates a short, empathetic quote for a single emotion.
+        """
         try:
-            if not isinstance(search_results, list) or not search_results:
-                return {
-                    "emotion_stats": [],
-                    "example_responses": {}
-                }
+            relevant_texts = [
+                str(r.get("text", "")) for r in search_results 
+                if self._extract_primary_emotion(r.get("emotion_label")) == emotion
+            ][:5]
 
-            # 1. extract and preprocess search results
-            processed_results = []
-            for result in search_results:
-                if isinstance(result, dict):
-                    processed_result = {
-                        "text": str(result.get("text", "")),
-                        "emotion_label": str(result.get("emotion_label", "")),
-                        "score": float(result.get("score", 0.0))
-                    }
-                    processed_results.append(processed_result)
-
-            if not processed_results:
-                return {
-                    "emotion_stats": [],
-                    "example_responses": {}
-                }
-
-            # 2. calculate emotion statistics
-            emotion_stats = self._calculate_emotion_stats(processed_results, user_input)
-            if not emotion_stats:
-                return {
-                    "emotion_stats": [],
-                    "example_responses": {}
-                }
-
-            # 3. generate example responses
-            example_responses = self._generate_example_responses(processed_results, emotion_stats)
-
-            return {
-                "emotion_stats": emotion_stats,
-                "example_responses": example_responses
-            }
-
+            prompt = f"""
+            Given that a user is expressing feelings related to "{emotion}", and has shared experiences like: "{', '.join(relevant_texts)}".
+            Please provide a short, empathetic, and encouraging response (1-2 sentences).
+            Acknowledge the feeling, offer gentle support, and speak directly to the user. Do not ask questions.
+            Example for "sadness": "It sounds like you're going through a really tough time. Remember to be kind to yourself as you navigate these feelings."
+            """
+            response = self.client.models.generate_content(model=self.model, contents=[prompt])
+            return response.text.strip()
         except Exception as e:
-            print(f"Error in process_search_results: {e}")
-            return {
-                "emotion_stats": [],
-                "example_responses": {}
-            }
+            print(f"Error generating quote for {emotion}: {e}")
+            return f"It's valid to feel {emotion}. Acknowledging this is a brave step."
+
+    def _generate_analysis(self, label: str, definition: str, user_input: str) -> str:
+        """
+        Generates a counselor-style analysis for a single emotion.
+        """
+        try:
+            prompt = f"""
+            As a psychological counselor, analyze why the user's text might contain the emotion '{label}'.
+            The definition of '{label}' is: "{definition}".
+            User's text: "{user_input}"
+            
+            Your task:
+            1. Write an analysis of 4-5 sentences.
+            2. Start by validating the user's feelings.
+            3. Connect specific phrases or situations from the user's text to the definition of the emotion.
+            4. Explain how these elements contribute to the feeling of '{label}'.
+            5. Maintain a supportive and professional tone.
+            
+            Example for 'sadness': "It's completely understandable that you're feeling a sense of sadness. You mentioned being late, being singled out by the teacher, and the heavy feeling of 'everyone's eyes' on you. These experiences align with the core of sadness, which is often rooted in feelings of loss—in this case, a loss of control and a sense of belonging in that moment. The rainy day you described can also mirror and amplify this internal state of emotional pain and sorrow."
+            """
+            response = self.client.models.generate_content(model=self.model, contents=[prompt])
+            return response.text.strip()
+        except Exception as e:
+            print(f"Error generating analysis for {label}: {e}")
+            return "Analyzing this feeling is the first step toward understanding it better."
+
+    def _generate_summary_report(self, enriched_stats: List[Dict], user_input: str) -> str:
+        """
+        Generates a final, comprehensive summary report for the user.
+        """
+        try:
+            analysis_summary = "\n".join([f"- For '{s['label']}': {s['analysis']}" for s in enriched_stats])
+            
+            # Determine overall sentiment for tailoring suggestions
+            query_emotion_center = self._get_query_emotion_profile(user_input)
+            sentiment_type = "negative" if query_emotion_center is not None and query_emotion_center[0] < 0 else "positive"
+
+            prompt = f"""
+            You are an empathetic AI assistant. Your task is to write a summary report for a user based on a detailed emotional analysis of their text.
+
+            Here is the user's original text:
+            "{user_input}"
+
+            Here is a summary of the key emotions detected and their psychological analysis:
+            {analysis_summary}
+
+            Based on all this information, please write a comprehensive summary report that includes:
+            1.  **Opening**: Start with a warm, validating opening that summarizes the core emotional state in 1-2 sentences.
+            2.  **Deeper Insight**: Briefly synthesize the individual analyses. Explain how the key emotions (like {', '.join(s['label'] for s in enriched_stats)}) are interconnected in the user's experience.
+            3.  **Actionable Suggestions**: Provide 2-3 concrete, actionable suggestions tailored to their emotional state.
+                - If the user's sentiment is primarily '{sentiment_type}', suggest ways to soothe or process these feelings (e.g., mindfulness, journaling, talking to a friend).
+                - If the sentiment is positive, suggest ways to cherish, extend, or build upon these feelings.
+            4.  **Closing**: End with a hopeful and encouraging closing statement.
+
+            Please make the report detailed, supportive, and easy to understand.
+            """
+            response = self.client.models.generate_content(model=self.model, contents=[prompt])
+            return response.text.strip()
+        except Exception as e:
+            print(f"Error generating summary report: {e}")
+            return "We have analyzed your feelings and want to remind you that your emotional well-being is important. Taking time to understand your feelings is a positive step."
 
     def _extract_primary_emotion(self, emotion_label) -> str:
         """Extract the primary emotion from a complex emotion label structure"""
@@ -320,57 +445,3 @@ Return only a number from 0-10, where:
             })
 
         return emotion_stats
-
-    def _generate_example_responses(self, search_results: List[Dict], emotion_stats: List[Dict]) -> Dict:
-        """Generate example responses for each emotion"""
-        try:
-            example_responses = {}
-            
-            # Generate responses for each emotion label in the corrected stats
-            for emotion_info in emotion_stats:
-                emotion = emotion_info.get("label")
-                if not emotion:
-                    continue
-
-                # Find relevant texts for this emotion from the original results
-                relevant_texts = []
-                for result in search_results:
-                    primary_emotion = self._extract_primary_emotion(result.get("emotion_label"))
-                    if primary_emotion == emotion:
-                        relevant_texts.append(str(result.get("text", "")))
-                
-                # Limit to top 5 relevant texts to keep the prompt concise
-                relevant_texts = relevant_texts[:5]
-
-                # Generate a prompt to create an empathetic response
-                prompt = f"""
-Given that a user is expressing feelings related to "{emotion}", and has shared these experiences:
-- "{', '.join(relevant_texts)}"
-
-Please provide a short, empathetic, and encouraging response. The response should:
-- Acknowledge the user's feelings without being repetitive.
-- Offer gentle encouragement or a supportive perspective.
-- Be phrased as if you are speaking directly to the user.
-- Do NOT ask questions.
-- Keep it to 1-2 sentences.
-
-Example for "sadness": "It sounds like you're going through a really tough time. Remember to be kind to yourself as you navigate these feelings."
-
-Your response:
-"""
-                try:
-                    # Call Gemini to generate the response
-                    response = self.client.models.generate_content(
-                        model=self.model,
-                        contents=[prompt]
-                    )
-                    example_responses[emotion] = response.text.strip()
-                except Exception as e:
-                    print(f"Error generating Gemini response for {emotion}: {e}")
-                    example_responses[emotion] = f"It's valid to feel {emotion}. Acknowledging this is a brave step."
-
-            return example_responses
-
-        except Exception as e:
-            print(f"Error in _generate_example_responses: {e}")
-            return {} 

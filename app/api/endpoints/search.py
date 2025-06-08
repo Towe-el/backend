@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional, Dict
 from pydantic import BaseModel
+import asyncio
 from app.services.search_service import perform_semantic_search
 from app.services.conversation_guide_service import ConversationGuideService
 
@@ -56,6 +57,7 @@ class SearchResponse(BaseModel):
 async def search_emotions(query: SearchQuery):
     """
     Search for similar texts in the database and get AI analysis.
+    Use asyncio.to_thread to run sync logic in thread pool, keep API asynchronous
     """
     if not query.text.strip():
         raise HTTPException(status_code=400, detail="Query text cannot be empty.")
@@ -64,8 +66,8 @@ async def search_emotions(query: SearchQuery):
         # Initialize conversation guide service
         guide_service = ConversationGuideService()
         
-        # Perform semantic search with RAG
-        search_result = await perform_semantic_search(query.text, top_n=20)
+        # run sync search logic in thread pool using asyncio.to_thread
+        search_result = await asyncio.to_thread(perform_semantic_search, query.text, 30)
         search_results_raw = search_result["results"]
         rag_analysis = search_result["rag_analysis"]
         

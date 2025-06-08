@@ -21,13 +21,24 @@ index_definition = {
             },
             "text": {
                 "type": "string"
+            },
+            "emotion_label": {
+                "type": "document",
+                "fields": {
+                    "tag": {
+                        "type": "token"
+                    },
+                    "cnt": {
+                        "type": "number"
+                    }
+                }
             }
         }
     }
 }
 
 # index name
-index_name = "vector_index"
+index_name = "vector_search_index"
 
 try:
     # list the existing indexes
@@ -65,7 +76,8 @@ try:
         print(f"- {index['name']}")
 
 except Exception as e:
-    print(f"An error occurred: {str(e)}")
+    print(f"Error creating search index: {e}")
+    raise
 
 finally:
     client.close()

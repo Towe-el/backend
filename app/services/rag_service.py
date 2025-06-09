@@ -43,11 +43,12 @@ EMOTION_VA_MAP = {
     # Top-Right Quadrant (V+, A+): Positive, High Arousal
     "excitement": (0.8, 0.8), "joy": (0.8, 0.6), "love": (0.9, 0.5),
     "amusement": (0.6, 0.5), "surprise": (0.4, 0.7), "desire": (0.6, 0.6),
-    "pride": (0.7, 0.5), "optimism": (0.7, 0.4), "curiosity": (0.5, 0.5),
+    "pride": (0.7, 0.5), "curiosity": (0.5, 0.5),
 
     # Bottom-Right Quadrant (V+, A-): Positive, Low Arousal
-    "gratitude": (0.8, -0.3), "caring": (0.7, -0.4), "approval": (0.6, -0.2),
+    "gratitude": (0.8, -0.3), "caring": (0.7, -0.4), "approval": (0.6, -0.3),
     "admiration": (0.7, -0.5), "relief": (0.5, -0.5), "realization": (0.3, -0.2),
+    "optimism": (0.7, -0.4),
 
     # Top-Left Quadrant (V-, A+): Negative, High Arousal
     "anger": (-0.7, 0.8), "fear": (-0.6, 0.8), "annoyance": (-0.5, 0.6),

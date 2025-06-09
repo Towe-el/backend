@@ -128,31 +128,31 @@ class EmotionDetector:
         # Analyze sentence structure
         structure_analysis = self._analyze_sentence_structure(text)
 
-        # Overall score - adjust weights to be more lenient
+        # Overall score - 调整权重使其更严格
         emotion_score = (
-            similarities.get('high_emotion', 0) * 0.25 +  # Reduced weight of high emotion similarity
-            (1 - similarities.get('neutral', 0)) * 0.25 +  # Increased weight of non-neutral degree
-            structure_analysis['personal_pronoun_ratio'] * 0.2 +  # Keep personal pronouns weight
-            structure_analysis['emotion_word_ratio'] * 0.2 +  # Keep emotion words weight
-            structure_analysis['intensity_indicator_ratio'] * 0.1  # Keep intensity indicators weight
+            similarities.get('high_emotion', 0) * 0.3 +  # 增加高情感相似度权重
+            (1 - similarities.get('neutral', 0)) * 0.2 +  # 减少非中性权重
+            structure_analysis['personal_pronoun_ratio'] * 0.2 +  
+            structure_analysis['emotion_word_ratio'] * 0.2 +  
+            structure_analysis['intensity_indicator_ratio'] * 0.1  
         )
 
-        # Adjust emotion intensity calculation - more lenient scaling
-        base_intensity = min(1.0, max(0.0, emotion_score * 2.0))  # Increased multiplier from 1.5 to 2.0
+        # 更严格的情感强度计算
+        base_intensity = min(1.0, max(0.0, emotion_score * 2.0))
         
-        # Adjust confidence calculation - more lenient
+        # 更严格的置信度计算
         confidence = min(1.0, max(0.0, 
-            (similarities.get('high_emotion', 0) * 0.25 + 
-             structure_analysis['emotion_word_ratio'] * 0.35 +  # Increased weight for emotion words
-             structure_analysis['personal_pronoun_ratio'] * 0.25 +  # Increased weight for personal pronouns
-             structure_analysis['intensity_indicator_ratio'] * 0.15) * 2.0  # Increased multiplier
+            (similarities.get('high_emotion', 0) * 0.3 + 
+             structure_analysis['emotion_word_ratio'] * 0.3 +  
+             structure_analysis['personal_pronoun_ratio'] * 0.2 +  
+             structure_analysis['intensity_indicator_ratio'] * 0.2) * 1.5
         ))
 
-        # Lower thresholds for emotion content determination
-        has_emotion = base_intensity > 0.15  # Lowered from 0.2
+        # 更严格的情感内容判断
+        has_emotion = base_intensity > 0.25
 
-        # More lenient needs_more_detail threshold
-        needs_more_detail = base_intensity < 0.15 or confidence < 0.25  # Lowered from 0.2/0.3
+        # 更严格的needs_more_detail阈值
+        needs_more_detail = base_intensity < 0.35 or confidence < 0.3
 
         return {
             'has_emotion_content': has_emotion,
@@ -177,29 +177,71 @@ class ConversationGuideService:
         self.context_manager = ContextManager()
         self.input_analyzer = InputAnalyzer()
         self.prompt_generator = PromptGenerator()
+        
+        # 添加临时输入存储（会话级别，刷新后释放）
+        self.accumulated_input = []  # 存储用户在当前会话中的所有输入
+        self.session_start_time = datetime.now()
+
+    def clear_accumulated_input(self):
+        """清空累积的用户输入（用于开始新的会话）"""
+        print(f"Clearing accumulated input. Previous inputs: {self.accumulated_input}")
+        self.accumulated_input = []
+        self.session_start_time = datetime.now()
+
+    def get_accumulated_text(self) -> str:
+        """获取累积的所有用户输入文本"""
+        return " ".join(self.accumulated_input)
 
     async def process_user_input(self, user_input: str) -> Dict:
         try:
-            # 1. analyze user input
-            analysis = self.input_analyzer.analyze_input(user_input)
+            # 添加当前输入到累积存储中
+            self.accumulated_input.append(user_input.strip())
+            
+            # 调试日志：打印累积的输入
+            print(f"Session start time: {self.session_start_time}")
+            print(f"Current input: '{user_input}'")
+            print(f"Accumulated inputs: {self.accumulated_input}")
+            print(f"Combined accumulated text: '{self.get_accumulated_text()}'")
+            
+            # 1. 分析累积的用户输入（而不是单独分析当前输入）
+            accumulated_text = self.get_accumulated_text()
+            analysis = self.input_analyzer.analyze_input(accumulated_text)
+            
+            print(f"Analysis result: {analysis}")
             
             # 2. get relevant context
             context = self.context_manager.get_relevant_context()
             
-            # 3. generate guide prompt
-            guide_response = await self._generate_ai_guide(
-                user_input, 
-                analysis, 
-                context
-            )
+            # 3. 根据质量检测结果决定是否生成引导
+            guidance_response = None
+            if analysis["needs_more_detail"]:
+                # 只有在需要更多细节时才生成引导响应
+                guidance_response = await self._generate_ai_guide(
+                    user_input,  # 当前输入
+                    accumulated_text,  # 累积输入
+                    analysis, 
+                    context,
+                    len(self.accumulated_input)  # 输入轮次
+                )
+            else:
+                # 质量检测通过，不需要引导
+                print("Quality check passed - no guidance needed")
+                guidance_response = "Your input is comprehensive and ready for analysis. You can now proceed to search for similar experiences and get detailed insights."
             
-            # 4. update context
-            self.context_manager.update_context(user_input, guide_response)
+            # 4. update context (只有在需要更多输入时才不更新正式的对话历史)
+            if not analysis["needs_more_detail"]:
+                # 质量检测通过，将累积的内容作为完整输入记录到对话历史
+                self.context_manager.update_context(accumulated_text, guidance_response)
+                # 注意：这里不清空累积输入，等待用户主动触发搜索后再清空
+                print(f"Quality check passed. Ready for search. Accumulated input: '{accumulated_text}'")
             
             return {
-                "guidance_response": guide_response,
+                "guidance_response": guidance_response,
                 "analysis": analysis,
-                "needs_more_input": analysis["needs_more_detail"]
+                "needs_more_input": analysis["needs_more_detail"],
+                "accumulated_text": accumulated_text,  # 返回累积文本供前端参考
+                "input_round": len(self.accumulated_input) if analysis["needs_more_detail"] else 0,
+                "ready_for_search": not analysis["needs_more_detail"]  # 新增：表示是否准备好搜索
             }
         except Exception as e:
             print(f"Error in process_user_input: {str(e)}")
@@ -213,20 +255,27 @@ class ConversationGuideService:
                     },
                     "needs_more_detail": True
                 },
-                "needs_more_input": True
+                "needs_more_input": True,
+                "accumulated_text": self.get_accumulated_text(),
+                "input_round": len(self.accumulated_input),
+                "ready_for_search": False
             }
 
     async def _generate_ai_guide(
         self, 
-        user_input: str, 
+        current_input: str,
+        accumulated_text: str,
         analysis: Dict, 
-        context: List[Dict]
+        context: List[Dict],
+        input_round: int
     ) -> str:
         # build prompt template
         prompt = self.prompt_generator.create_prompt(
-            user_input, 
+            current_input,
+            accumulated_text,
             analysis, 
-            context
+            context,
+            input_round
         )
         
         try:
@@ -254,11 +303,24 @@ class InputAnalyzer:
         # Perform emotion analysis
         emotion_analysis = self.emotion_detector.analyze_emotion_content(text)
         
-        # More lenient criteria for needs_more_detail
-        needs_more_detail = (
-            len(sentences) < 2 or  # Reduced from 3 to 2
-            emotion_analysis['analysis_details']['needs_more_detail']
-        )
+        # 更严格的综合质量判断
+        word_count = len(text.split())
+        
+        # 基本要求：至少3句话且30个词
+        basic_length_sufficient = len(sentences) >= 3 and word_count >= 30
+        
+        # 情感分析要求
+        emotion_sufficient = not emotion_analysis['analysis_details']['needs_more_detail']
+        
+        # 综合判断：两个条件都要满足
+        needs_more_detail = not (basic_length_sufficient and emotion_sufficient)
+        
+        print(f"Quality analysis details:")
+        print(f"  - sentences: {len(sentences)} (need >=3)")
+        print(f"  - words: {word_count} (need >=30)")
+        print(f"  - basic_length_sufficient: {basic_length_sufficient}")
+        print(f"  - emotion_sufficient: {emotion_sufficient}")
+        print(f"  - final needs_more_detail: {needs_more_detail}")
         
         # Merge analysis results
         return {
@@ -270,9 +332,11 @@ class InputAnalyzer:
 class PromptGenerator:
     def create_prompt(
         self, 
-        user_input: str, 
+        current_input: str,
+        accumulated_text: str,
         analysis: Dict, 
-        context: List[Dict]
+        context: List[Dict],
+        input_round: int
     ) -> str:
         # Build prompt based on analysis
         emotion_analysis = analysis["emotion_analysis"]
@@ -280,32 +344,56 @@ class PromptGenerator:
         intensity = emotion_analysis["emotion_intensity"]
         needs_detail = analysis["needs_more_detail"]
         
-        prompt = f"""As an empathetic AI guide, analyze the following user input:
-"{user_input}"
+        # 根据输入轮次调整引导策略
+        if input_round == 1:
+            # 第一次输入，常规引导
+            guidance_strategy = "This is the user's first input in this session."
+        else:
+            # 后续输入，需要递进式引导
+            guidance_strategy = f"This is the user's {input_round} input in this session. They have previously shared: '{accumulated_text.replace(current_input.strip(), '').strip()}'. Focus on what's still missing rather than repeating previous guidance."
 
-Based on the analysis:
+        prompt = f"""As an empathetic AI guide, analyze the user's input in this session:
+
+Current input: "{current_input}"
+All accumulated input: "{accumulated_text}"
+
+Analysis context:
 - Emotional content: {"Present" if has_emotion else "Limited"}
 - Emotional intensity: {intensity:.2f}
 - Needs more detail: {"Yes" if needs_detail else "No"}
+- {guidance_strategy}
 
 Please provide a response that:
-1. Acknowledges their current emotional state in 1 or 2 sentences
+1. Acknowledges their current sharing (1-2 sentences)
 2. Shows empathy and understanding
-3. {'''If they need more detail, provide:
-   a) 2-3 specific follow-up questions from this list:
-      - "What happened that made you feel this way?"
-      - "When did you start feeling like this?"
-      - "How does this feeling show up in your body?"
-      - "What thoughts come up with this feeling?"
-      - "Did something specific trigger this emotion?"
-      - "How long have you been feeling this way?"
-   b) A set of emotion words they might relate to, like:
-      - For sadness: "disappointed", "lonely", "hopeless", "hurt"
-      - For anger: "frustrated", "irritated", "furious", "resentful"
-      - For anxiety: "nervous", "overwhelmed", "worried", "tense"
-      Choose words that best match their expressed emotion.''' if needs_detail else "Acknowledge that they've expressed themselves clearly"}
 
-Keep the response concise and supportive. If suggesting words, present them as options to consider, not as declarations about their state."""
+{"3. Since this is not their first input, focus on what specific aspects are still missing. Avoid repeating guidance for information they've already provided. Instead, identify what gaps remain and guide them towards those specific areas." if input_round > 1 else "3. "}
+{'''If they need more detail, provide targeted follow-up questions. Choose 2-3 specific questions that address what's missing:
+   
+   For incomplete emotional expression:
+   - "What happened that made you feel this way?"
+   - "When did you start feeling like this?"
+   - "How does this feeling show up in your body?"
+   - "What thoughts come up with this feeling?"
+   - "Did something specific trigger this emotion?"
+   - "How long have you been feeling this way?"
+   
+   For insufficient context:
+   - "Can you tell me more about the situation?"
+   - "What led up to this moment?"
+   - "How is this affecting your daily life?"
+   
+   Also provide emotion words they might relate to:
+   - For sadness: "disappointed", "lonely", "hopeless", "hurt", "discouraged"
+   - For anger: "frustrated", "irritated", "furious", "resentful", "betrayed"
+   - For anxiety: "nervous", "overwhelmed", "worried", "tense", "uncertain"
+   - For joy: "excited", "content", "grateful", "proud", "fulfilled"
+   
+   Choose words that best match their expressed emotion.''' if needs_detail else "Acknowledge that they've expressed themselves clearly and their input is sufficient."}
+
+{"Focus on building upon what they've already shared rather than starting over. Be progressive and specific about what additional information would be most helpful." if input_round > 1 else ""}
+
+Keep the response concise, supportive, and tailored to their current level of sharing."""
 
         return prompt
 

@@ -141,8 +141,8 @@ class EmotionDetector:
         
         confidence = min(1.0, max(0.0, 
             (similarities.get('high_emotion', 0) * 0.3 + 
-             structure_analysis['emotion_word_ratio'] * 0.3 +  
-             structure_analysis['personal_pronoun_ratio'] * 0.2 +  
+             structure_analysis['emotion_word_ratio'] * 0.2 +  
+             structure_analysis['personal_pronoun_ratio'] * 0.3 +  
              structure_analysis['intensity_indicator_ratio'] * 0.2) * 1.5
         ))
 

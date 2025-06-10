@@ -5,38 +5,6 @@ import os
 import ast # Use ast for safe literal evaluation
 import numpy as np
 
-# Official emotion definitions, to be provided to the user.
-EMOTION_DEFINITIONS = {
-    "admiration": "Admiration is the feeling of finding something impressive or worthy of respect.",
-    "amusement": "Amusement is the feeling of finding something funny or being entertained.",
-    "anger": "Anger is a strong feeling of displeasure or antagonism.",
-    "annoyance": "Annoyance is a feeling of mild anger or irritation.",
-    "approval": "Approval is the feeling of having or expressing a favorable opinion.",
-    "caring": "Caring is the act of displaying kindness and concern for others.",
-    "confusion": "Confusion is a state of uncertainty or a lack of understanding.",
-    "curiosity": "Curiosity is a strong desire to know or learn something.",
-    "desire": "Desire is a strong feeling of wanting something or wishing for something to happen.",
-    "disappointment": "Disappointment is a feeling of sadness or displeasure caused by the nonfulfillment of one's hopes or expectations.",
-    "disapproval": "Disapproval is the feeling of having or expressing an unfavorable opinion.",
-    "disgust": "Disgust is a feeling of revulsion or strong disapproval aroused by something unpleasant or offensive.",
-    "embarrassment": "Embarrassment is a feeling of self-consciousness, shame, or awkwardness.",
-    "excitement": "Excitement is a feeling of great enthusiasm and eagerness.",
-    "fear": "Fear is the feeling of being afraid or worried.",
-    "gratitude": "Gratitude is a feeling of thankfulness and appreciation.",
-    "grief": "Grief is intense sorrow, especially when caused by someone's death.",
-    "joy": "Joy is a feeling of great pleasure and happiness.",
-    "love": "Love is a strong positive emotion of regard and affection.",
-    "nervousness": "Nervousness is a feeling of apprehension, worry, or anxiety.",
-    "optimism": "Optimism is a feeling of hopefulness and confidence about the future or the success of something.",
-    "pride": "Pride is a feeling of pleasure or satisfaction due to one's own achievements or the achievements of those one is closely associated with.",
-    "realization": "Realization is the act of becoming aware of something.",
-    "relief": "Relief is a feeling of reassurance and relaxation following release from anxiety or distress.",
-    "remorse": "Remorse is a feeling of regret or guilt.",
-    "sadness": "Sadness is a feeling of emotional pain or sorrow.",
-    "surprise": "Surprise is a feeling of being astonished or startled by something unexpected.",
-    "neutral": "Neutral is a state of lacking strong emotional content."
-}
-
 # Valence-Arousal (VA) model, meticulously re-calibrated based on UI/UX and a High/Medium/Low intensity principle.
 # V: Valence (Pleasure), A: Arousal (Activation)
 EMOTION_VA_MAP = {
@@ -154,16 +122,13 @@ class RAGProcessor:
         """
         label = emotion_stat["label"]
         
-        # 1. Get Definition
-        definition = EMOTION_DEFINITIONS.get(label, "No definition available.")
-
-        # 2. Get Quote (formerly example_response)
+        # 1. Get Quote - represents how others experience this emotion
         quote = self._generate_quote(label, search_results)
         
-        # 3. Get Analysis
-        analysis = self._generate_analysis(label, definition, user_input)
+        # 2. Get Analysis
+        analysis = self._generate_analysis(label, user_input)
         
-        # 4. Check for high-intensity negative emotions to add advice
+        # 3. Check for high-intensity negative emotions to add advice
         query_emotion_center = self._get_query_emotion_profile(user_input)
         if query_emotion_center is not None:
             is_negative = query_emotion_center[0] < -0.1
@@ -175,51 +140,82 @@ class RAGProcessor:
             "label": label,
             "count": emotion_stat["count"],
             "percentage": emotion_stat["percentage"],
-            "definition": definition,
             "quote": quote,
             "analysis": analysis
         }
 
     def _generate_quote(self, emotion: str, search_results: List[Dict]) -> str:
         """
-        Generates a short, empathetic quote for a single emotion.
+        Generates a first-person quote that represents how others express this emotion.
+        Shows the user "others have expressed feelings like this too".
         """
         try:
             relevant_texts = [
                 str(r.get("text", "")) for r in search_results 
                 if self._extract_primary_emotion(r.get("emotion_label")) == emotion
-            ][:5]
+            ][:8]  # Get more examples for better quote generation
+
+            if not relevant_texts:
+                return f"Sometimes I experience {emotion} in ways that are hard to explain."
 
             prompt = f"""
-            Given that a user is expressing feelings related to "{emotion}", and has shared experiences like: "{', '.join(relevant_texts)}".
-            Please provide a short, empathetic, and encouraging response (1-2 sentences).
-            Acknowledge the feeling, offer gentle support, and speak directly to the user. Do not ask questions.
-            Example for "sadness": "It sounds like you're going through a really tough time. Remember to be kind to yourself as you navigate these feelings."
+            Based on these real experiences from people who felt "{emotion}":
+            {chr(10).join([f"- {text}" for text in relevant_texts])}
+            
+            Generate ONLY 1-2 complete first-person sentences that express similar experiences of "{emotion}".
+            
+            CRITICAL REQUIREMENTS:
+            - Output ONLY the first-person sentences, nothing else
+            - No introduction, no explanation, no context
+            - No phrases like "Here are two..." or "Based on..."
+            - Just the raw first-person sentences
+            
+            These sentences should:
+            - Use DIVERSE first-person sentence structures (not just "I feel...")
+            - Describe WHAT the emotion feels like and WHY someone experiences it
+            - Be complete, natural thoughts that someone could actually say
+            - Sound authentic and relatable
+            - Help readers think "others have felt this way too"
+            
+            Use varied sentence starters like:
+            - "I feel..." / "I'm..." / "I can't..." / "I keep..."
+            - "Everything seems..." / "Nothing makes..." / "It's like..."
+            - "My heart..." / "Sometimes I..." / "I just want..."
+            - "I'm afraid that..." / "I wish..." / "I hate how..."
+            
+            Examples with diverse structures:
+            For "sadness": "Everything feels pointless when I realize how much I've lost."
+            For "anxiety": "I can't shake this feeling that something terrible is about to happen."
+            For "anger": "It's infuriating how people just ignore what I'm going through."
+            For "joy": "My whole world lights up when I see how much progress I've made."
+            For "loneliness": "Sometimes I wonder if anyone would even notice if I disappeared."
+            For "relief": "I can finally breathe again now that this nightmare is over."
+            
+            Generate similar first-person expression(s) for "{emotion}" (output ONLY the sentences):
             """
             response = self.client.models.generate_content(model=self.model, contents=[prompt])
             return response.text.strip()
         except Exception as e:
             print(f"Error generating quote for {emotion}: {e}")
-            return f"It's valid to feel {emotion}. Acknowledging this is a brave step."
+            return f"Sometimes I experience {emotion} in ways that are deeply personal."
 
-    def _generate_analysis(self, label: str, definition: str, user_input: str) -> str:
+    def _generate_analysis(self, label: str, user_input: str) -> str:
         """
         Generates a counselor-style analysis for a single emotion.
         """
         try:
             prompt = f"""
             As a psychological counselor, analyze why the user's text might contain the emotion '{label}'.
-            The definition of '{label}' is: "{definition}".
             User's text: "{user_input}"
             
             Your task:
             1. Write an analysis of 4-5 sentences.
             2. Start by validating the user's feelings.
-            3. Connect specific phrases or situations from the user's text to the definition of the emotion.
+            3. Connect specific phrases or situations from the user's text to the emotion of '{label}'.
             4. Explain how these elements contribute to the feeling of '{label}'.
             5. Maintain a supportive and professional tone.
             
-            Example for 'sadness': "It's completely understandable that you're feeling a sense of sadness. You mentioned being late, being singled out by the teacher, and the heavy feeling of 'everyone's eyes' on you. These experiences align with the core of sadness, which is often rooted in feelings of loss—in this case, a loss of control and a sense of belonging in that moment. The rainy day you described can also mirror and amplify this internal state of emotional pain and sorrow."
+            Example for 'sadness': "It's completely understandable that you're feeling a sense of sadness. You mentioned being late, being singled out by the teacher, and the heavy feeling of 'everyone's eyes' on you. These experiences align with sadness, which often emerges from situations involving loss, disappointment, or feeling isolated. The rainy day you described can also mirror and amplify this internal state of emotional pain and sorrow."
             """
             response = self.client.models.generate_content(model=self.model, contents=[prompt])
             return response.text.strip()
@@ -337,6 +333,7 @@ Return only a number from 0-10, where:
         2. Aggregates all emotions from search results.
         3. "Quadrant Guard": Instantly discards any emotion not in the same or adjacent quadrant as the query's center.
         4. Calculates distance for the remaining candidates and filters the closest ones.
+        5. Excludes 'neutral' emotion from search results as it's not useful for emotional analysis.
         """
         # 1. Get the user query's emotional profile.
         query_emotion_center = self._get_query_emotion_profile(user_input)
@@ -345,7 +342,7 @@ Return only a number from 0-10, where:
         else:
             print(f"Query Emotion Center (VA): {query_emotion_center}")
 
-        # 2. Aggregate all emotions.
+        # 2. Aggregate all emotions, excluding 'neutral'.
         emotion_data = {}
         total_cnt_sum = 0
         for result in search_results:
@@ -365,7 +362,7 @@ Return only a number from 0-10, where:
                     if isinstance(label_item, dict):
                         tag = label_item.get('tag')
                         cnt = label_item.get('cnt', 0)
-                        if not tag or cnt == 0:
+                        if not tag or cnt == 0 or tag.lower() == 'neutral':
                             continue
                         if tag not in emotion_data:
                             emotion_data[tag] = {'score': 0.0, 'count': 0, 'docs': 0}
@@ -375,7 +372,7 @@ Return only a number from 0-10, where:
                         total_cnt_sum += cnt
             except (ValueError, SyntaxError):
                 tag = str(raw_emotion_label).strip()
-                if tag:
+                if tag and tag.lower() != 'neutral':
                     if tag not in emotion_data:
                         emotion_data[tag] = {'score': 0.0, 'count': 0, 'docs': 0}
                     emotion_data[tag]['score'] += result.get("score", 0.0)

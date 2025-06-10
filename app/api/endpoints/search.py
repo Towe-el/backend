@@ -10,7 +10,7 @@ router = APIRouter(
     tags=["search"]
 )
 
-# 全局conversation guide service实例，用于保持会话状态
+# global conversation guide service instance, keep session state across requests
 global_guide_service = ConversationGuideService()
 
 class SearchQuery(BaseModel):
@@ -18,7 +18,7 @@ class SearchQuery(BaseModel):
     Model for search query input
     """
     text: str
-    execute_search: bool = False  # 新增：是否执行搜索，默认为False
+    execute_search: bool = False  # whether to execute search, default is False
 
 class SearchResultItem(BaseModel):
     """
@@ -26,7 +26,7 @@ class SearchResultItem(BaseModel):
     """
     id: Optional[str]
     text: Optional[str]
-    emotion_label: Optional[str]  # 处理为可选字符串，在转换时处理list类型
+    emotion_label: Optional[str]
     score: Optional[float]
 
 class EmotionAnalysis(BaseModel):
@@ -50,7 +50,6 @@ class EnrichedEmotionStat(BaseModel):
     label: str
     count: int
     percentage: float
-    definition: str
     quote: str
     analysis: str
 
@@ -70,9 +69,9 @@ class SearchResponse(BaseModel):
     emotion_analysis: Optional[EmotionAnalysis]
     guidance_response: Optional[str]
     rag_analysis: Optional[RAGAnalysis]
-    accumulated_text: Optional[str] = None  # 返回累积文本
-    input_round: Optional[int] = None  # 返回输入轮次
-    ready_for_search: Optional[bool] = None  # 新增：是否准备好执行搜索
+    accumulated_text: Optional[str] = None
+    input_round: Optional[int] = None
+    ready_for_search: Optional[bool] = None
 
 @router.post("/", response_model=SearchResponse)
 async def search_emotions(query: SearchQuery):
@@ -86,26 +85,26 @@ async def search_emotions(query: SearchQuery):
         raise HTTPException(status_code=400, detail="Query text cannot be empty.")
 
     try:
-        # 使用全局service实例来保持会话状态
+        # use global service instance to maintain session state
         guide_service = global_guide_service
         
-        # 如果是执行搜索的请求，直接进行搜索（跳过重复的质量检测）
+        # if execute_search is True, directly perform search (skip quality check)
         if query.execute_search:
             print(f"Executing search for accumulated text")
             
-            # 获取当前累积的文本
+            # get current accumulated text
             accumulated_text = guide_service.get_accumulated_text()
             if not accumulated_text:
                 raise HTTPException(status_code=400, detail="No accumulated text found. Please provide input first.")
             
             print(f"Searching with accumulated text: '{accumulated_text}'")
             
-            # 执行搜索和RAG分析
+            # perform search and RAG analysis
             search_result = await asyncio.to_thread(perform_semantic_search, accumulated_text, 30)
             search_results_raw = search_result["results"]
             rag_analysis_data = search_result.get("rag_analysis")
             
-            # 将原始结果转换为Pydantic模型，处理emotion_label的类型转换
+            # convert raw results to Pydantic model, handle emotion_label type conversion
             pydantic_results = []
             for doc in search_results_raw:
                 emotion_label = doc.get("emotion_label")
@@ -121,26 +120,25 @@ async def search_emotions(query: SearchQuery):
                     score=doc.get("score")
                 ))
             
-            # 搜索完成后清空累积输入
+            # clear accumulated input after search
             guide_service.clear_accumulated_input()
             
             message = "No matching documents found." if not search_results_raw else None
             return SearchResponse(
                 results=pydantic_results,
                 message=message,
-                emotion_analysis=None,  # 搜索时不需要返回情感分析
+                emotion_analysis=None,
                 guidance_response="Search completed successfully. Here are the results based on your emotional experience.",
                 rag_analysis=RAGAnalysis(**rag_analysis_data) if rag_analysis_data else None,
                 accumulated_text=accumulated_text,
-                input_round=0,  # 搜索完成后重置
+                input_round=0,
                 ready_for_search=False
             )
         
-        # 常规质量检测流程
         print(f"Processing conversation guide analysis for: '{query.text}'")
         guide_result = await guide_service.process_user_input(query.text)
         
-        # 创建情感分析响应
+        # create emotion analysis response
         emotion_analysis = None
         if guide_result and "analysis" in guide_result:
             analysis = guide_result["analysis"]
@@ -151,13 +149,13 @@ async def search_emotions(query: SearchQuery):
                 needs_more_detail=analysis.get("needs_more_detail", False),
             )
         
-        # 获取状态信息
+        # get status information
         needs_more_detail = guide_result.get("needs_more_input", True) if guide_result else True
         accumulated_text = guide_result.get("accumulated_text", "") if guide_result else ""
         input_round = guide_result.get("input_round", 0) if guide_result else 0
         ready_for_search = guide_result.get("ready_for_search", False) if guide_result else False
         
-        # 调试质量检查逻辑
+        # debug quality check logic
         print(f"Quality check details:")
         print(f"  - needs_more_detail: {needs_more_detail}")
         print(f"  - ready_for_search: {ready_for_search}")
@@ -167,18 +165,18 @@ async def search_emotions(query: SearchQuery):
             print(f"  - sentence_count: {guide_result['analysis']['sentence_count']}")
             print(f"  - emotion_intensity: {guide_result['analysis']['emotion_analysis']['emotion_intensity']}")
         
-        # 返回质量检测结果，不执行搜索
+        # return quality check result, do not execute search
         if ready_for_search:
             message = "Your input quality is sufficient. Click the search button to find similar emotional experiences and get detailed analysis."
         else:
             message = "Please provide more detailed information about your emotional experience."
             
         return SearchResponse(
-            results=[],  # 质量检测阶段不返回搜索结果
+            results=[],
             message=message,
             emotion_analysis=emotion_analysis,
             guidance_response=guide_result.get("guidance_response") if guide_result else None,
-            rag_analysis=None,  # 质量检测阶段不进行RAG分析
+            rag_analysis=None,
             accumulated_text=accumulated_text,
             input_round=input_round,
             ready_for_search=ready_for_search
@@ -194,7 +192,7 @@ async def search_emotions(query: SearchQuery):
 @router.post("/clear-session", response_model=Dict[str, str])
 async def clear_session():
     """
-    清空会话的累积输入
+    clear accumulated input
     """
     try:
         global_guide_service.clear_accumulated_input()
@@ -205,7 +203,7 @@ async def clear_session():
 @router.get("/session-status", response_model=Dict)
 async def get_session_status():
     """
-    获取当前会话状态
+    get current session status
     """
     try:
         return {
@@ -226,19 +224,19 @@ async def execute_search():
     try:
         guide_service = global_guide_service
         
-        # 获取当前累积的文本
+        # get current accumulated text
         accumulated_text = guide_service.get_accumulated_text()
         if not accumulated_text:
             raise HTTPException(status_code=400, detail="No accumulated text found. Please provide input first.")
         
         print(f"Executing search for accumulated text: '{accumulated_text}'")
         
-        # 执行搜索和RAG分析
+        # perform search and RAG analysis
         search_result = await asyncio.to_thread(perform_semantic_search, accumulated_text, 30)
         search_results_raw = search_result["results"]
         rag_analysis_data = search_result.get("rag_analysis")
         
-        # 将原始结果转换为Pydantic模型，处理emotion_label的类型转换
+        # convert raw results to Pydantic model, handle emotion_label type conversion
         pydantic_results = []
         for doc in search_results_raw:
             emotion_label = doc.get("emotion_label")
@@ -254,18 +252,18 @@ async def execute_search():
                 score=doc.get("score")
             ))
         
-        # 搜索完成后清空累积输入
+        # clear accumulated input after search
         guide_service.clear_accumulated_input()
         
         message = "No matching documents found." if not search_results_raw else None
         return SearchResponse(
             results=pydantic_results,
             message=message,
-            emotion_analysis=None,  # 搜索时不需要返回情感分析
+            emotion_analysis=None,
             guidance_response="Search completed successfully. Here are the results based on your emotional experience.",
             rag_analysis=RAGAnalysis(**rag_analysis_data) if rag_analysis_data else None,
             accumulated_text=accumulated_text,
-            input_round=0,  # 搜索完成后重置
+            input_round=0,
             ready_for_search=False
         )
         

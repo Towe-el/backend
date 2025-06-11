@@ -1,18 +1,40 @@
-from fastapi import APIRouter, HTTPException
-from typing import List, Optional, Dict
+from fastapi import APIRouter, HTTPException, UploadFile, File, Header
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import asyncio
 from datetime import datetime, timedelta
 from app.services.search_service import perform_semantic_search
 from app.services.conversation_guide_service import ConversationGuideService
+from app.services.session_service import SessionService
 
 router = APIRouter(
     prefix="/search",
     tags=["search"]
 )
 
-# global conversation guide service instance, keep session state across requests
-global_guide_service = ConversationGuideService()
+# Instantiate all services
+# These are now mostly stateless or manage state externally (like SessionService)
+session_service = SessionService()
+guide_service = ConversationGuideService()
+
+class TextQuery(BaseModel):
+    text: str
+
+class BaseResponse(BaseModel):
+    session_id: str
+
+class SearchResponse(BaseResponse):
+    results: List[Dict] = []
+    rag_analysis: Optional[Dict] = None
+    message: Optional[str] = "Search completed successfully."
+
+class GuidanceResponse(BaseResponse):
+    guidance_response: str
+    accumulated_text: str
+    input_round: int
+    ready_for_search: bool
+    analysis: Dict[str, Any]
+    message: Optional[str] = "Input processed."
 
 class SearchQuery(BaseModel):
     """
@@ -55,164 +77,74 @@ class RAGAnalysis(BaseModel):
     enriched_emotion_stats: List[EnrichedEmotionStat]
     summary_report: str
 
-class SearchResponse(BaseModel):
-    """
-    Model for search response
-    """
-    results: List[SearchResultItem]
-    message: Optional[str]
-    emotion_analysis: Optional[EmotionAnalysis]
-    guidance_response: Optional[str]
-    rag_analysis: Optional[RAGAnalysis]
-    accumulated_text: Optional[str] = None
-    input_round: Optional[int] = None
-    ready_for_search: Optional[bool] = None
-
 def _auto_clear_old_sessions():
     """
     Automatically clear sessions older than 30 minutes
     """
     try:
-        if hasattr(global_guide_service, 'session_start_time') and global_guide_service.session_start_time:
-            time_diff = datetime.now() - global_guide_service.session_start_time
+        if hasattr(guide_service, 'session_start_time') and guide_service.session_start_time:
+            time_diff = datetime.now() - guide_service.session_start_time
             if time_diff > timedelta(minutes=30):
                 print("Auto-clearing old session (>30 minutes)")
-                global_guide_service.clear_accumulated_input()
+                guide_service.clear_accumulated_input()
     except Exception as e:
         print(f"Error in auto session cleanup: {e}")
 
-@router.post("/", response_model=SearchResponse)
-async def search_emotions(query: SearchQuery):
+@router.post("/", response_model=GuidanceResponse, summary="Process user's text input")
+async def process_text_input(query: TextQuery, session_id: Optional[str] = Header(None)):
     """
-    Process user input for quality check and provide guidance.
-    This endpoint only handles text quality analysis and guidance generation.
-    To execute search, use the /execute endpoint.
+    Processes user's text input. Manages session state in the database.
+    - If session_id is not provided in the header, a new session is created.
+    - The session_id from the response MUST be stored by the client and sent
+      back in the header for subsequent requests.
     """
     if not query.text.strip():
         raise HTTPException(status_code=400, detail="Query text cannot be empty.")
 
     try:
-        # Auto-clear old sessions
-        _auto_clear_old_sessions()
+        session = await session_service.get_or_create_session(session_id)
         
-        # use global service instance to maintain session state
-        guide_service = global_guide_service
-        
-        print(f"Processing conversation guide analysis for: '{query.text}'")
-        guide_result = await guide_service.process_user_input(query.text)
-        
-        # create emotion analysis response
-        emotion_analysis = None
-        if guide_result and "analysis" in guide_result:
-            analysis = guide_result["analysis"]
-            emotion_analysis = EmotionAnalysis(
-                has_emotion_content=analysis["emotion_analysis"]["has_emotion_content"],
-                emotion_intensity=analysis["emotion_analysis"]["emotion_intensity"],
-                confidence=analysis["emotion_analysis"]["confidence"],
-                needs_more_detail=analysis.get("needs_more_detail", False),
-            )
-        
-        # get status information
-        needs_more_detail = guide_result.get("needs_more_input", True) if guide_result else True
-        accumulated_text = guide_result.get("accumulated_text", "") if guide_result else ""
-        input_round = guide_result.get("input_round", 0) if guide_result else 0
-        ready_for_search = guide_result.get("ready_for_search", False) if guide_result else False
-        
-        # debug quality check logic
-        print(f"Quality check details:")
-        print(f"  - needs_more_detail: {needs_more_detail}")
-        print(f"  - ready_for_search: {ready_for_search}")
-        print(f"  - accumulated_text: '{accumulated_text}'")
-        print(f"  - input_round: {input_round}")
-        if guide_result and "analysis" in guide_result:
-            print(f"  - sentence_count: {guide_result['analysis']['sentence_count']}")
-            print(f"  - emotion_intensity: {guide_result['analysis']['emotion_analysis']['emotion_intensity']}")
-        
-        # provide appropriate message based on quality check
-        if ready_for_search:
-            message = "Your input quality is sufficient. Click the search button to find similar emotional experiences and get detailed analysis."
-        else:
-            message = "Please provide more detailed information about your emotional experience."
-            
-        return SearchResponse(
-            results=[],
-            message=message,
-            emotion_analysis=emotion_analysis,
-            guidance_response=guide_result.get("guidance_response") if guide_result else None,
-            rag_analysis=None,
-            accumulated_text=accumulated_text,
-            input_round=input_round,
-            ready_for_search=ready_for_search
+        guide_result = await guide_service.process_user_input(
+            user_text=query.text,
+            current_accumulated_text=session.get("accumulated_text", ""),
+            current_round=session.get("input_round", 0)
         )
+        
+        await session_service.update_session(session["_id"], guide_result)
+        
+        return GuidanceResponse(session_id=session["_id"], **guide_result)
         
     except Exception as e:
-        print(f"Unexpected error in /search endpoint: {str(e)} - Query: {query.text}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"An unexpected error occurred during the analysis."
-        )
+        print(f"Error in /search endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during analysis.")
 
-@router.post("/execute", response_model=SearchResponse)
-async def execute_search():
+@router.post("/execute", response_model=SearchResponse, summary="Execute search and RAG analysis")
+async def execute_search(session_id: str = Header(..., description="The session ID is required to execute a search.")):
     """
-    Execute search and RAG analysis for the accumulated text.
-    This endpoint is called when user clicks the search button.
+    Executes search using the accumulated text from the session.
+    Requires a valid session_id in the header.
     """
     try:
-        # Auto-clear old sessions
-        _auto_clear_old_sessions()
+        session = await session_service.get_session(session_id)
+        if not session or not session.get("accumulated_text"):
+            raise HTTPException(status_code=404, detail="Session not found or is empty.")
         
-        guide_service = global_guide_service
+        accumulated_text = session["accumulated_text"]
+        print(f"Executing search for session {session_id} with text: '{accumulated_text}'")
         
-        # get current accumulated text
-        accumulated_text = guide_service.get_accumulated_text()
-        if not accumulated_text:
-            raise HTTPException(status_code=400, detail="No accumulated text found. Please provide input first.")
-        
-        print(f"Executing search for accumulated text: '{accumulated_text}'")
-        
-        # perform search and RAG analysis
         search_result = await asyncio.to_thread(perform_semantic_search, accumulated_text, 30)
-        search_results_raw = search_result["results"]
-        rag_analysis_data = search_result.get("rag_analysis")
         
-        # convert raw results to Pydantic model, handle emotion_label type conversion
-        pydantic_results = []
-        for doc in search_results_raw:
-            emotion_label = doc.get("emotion_label")
-            if isinstance(emotion_label, list):
-                emotion_label_str = str(emotion_label)
-            else:
-                emotion_label_str = str(emotion_label) if emotion_label else ""
-            
-            pydantic_results.append(SearchResultItem(
-                id=doc.get("_id"), 
-                text=doc.get("text"), 
-                emotion_label=emotion_label_str,
-                score=doc.get("score")
-            ))
+        await session_service.clear_accumulated_text(session_id)
         
-        # clear accumulated input after search
-        guide_service.clear_accumulated_input()
-        
-        message = "No matching documents found." if not search_results_raw else None
         return SearchResponse(
-            results=pydantic_results,
-            message=message,
-            emotion_analysis=None,
-            guidance_response="Search completed successfully. Here are the results based on your emotional experience.",
-            rag_analysis=RAGAnalysis(**rag_analysis_data) if rag_analysis_data else None,
-            accumulated_text=accumulated_text,
-            input_round=0,
-            ready_for_search=False
+            session_id=session_id,
+            results=search_result.get("results", []),
+            rag_analysis=search_result.get("rag_analysis"),
         )
         
     except Exception as e:
-        print(f"Unexpected error in /search/execute endpoint: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"An unexpected error occurred during search execution."
-        )
+        print(f"Error in /search/execute endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during search execution.")
 
 @router.get("/session-status", response_model=Dict)
 async def get_session_status():
@@ -224,10 +156,10 @@ async def get_session_status():
         _auto_clear_old_sessions()
         
         return {
-            "accumulated_inputs": global_guide_service.accumulated_input,
-            "accumulated_text": global_guide_service.get_accumulated_text(),
-            "session_start_time": global_guide_service.session_start_time.isoformat() if global_guide_service.session_start_time else None,
-            "input_count": len(global_guide_service.accumulated_input)
+            "accumulated_inputs": guide_service.accumulated_input,
+            "accumulated_text": guide_service.get_accumulated_text(),
+            "session_start_time": guide_service.session_start_time.isoformat() if guide_service.session_start_time else None,
+            "input_count": len(guide_service.accumulated_input)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting session status: {str(e)}") 

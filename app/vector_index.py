@@ -1,13 +1,11 @@
-import os
 import time
-from pymongo import MongoClient
 from pymongo.operations import SearchIndexModel
-from pymongo.server_api import ServerApi
+from app.database import sync_client, sync_db, COLLECTION_NAME
 
-# Connect to MongoDB
-client = MongoClient(os.environ["MONGODB_URI"], server_api=ServerApi('1'))
-db = client.GoEmotion
-collection = db.vectorizedText
+# MongoDB connection
+client = sync_client
+db = sync_db
+collection = db[COLLECTION_NAME]
 
 # Define the vector search index
 index_definition = {

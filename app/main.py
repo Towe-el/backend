@@ -1,43 +1,17 @@
 import os
-from typing import Optional, List
 import datetime
-from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Body, HTTPException, status
-from fastapi.responses import Response
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import ConfigDict, BaseModel, Field, EmailStr
-from pydantic.functional_validators import BeforeValidator
-
-from typing_extensions import Annotated
-
-from bson import ObjectId
-import motor.motor_asyncio
-from pymongo import ReturnDocument
 
 from app.api.endpoints import search
 from app.api.endpoints import debug
 from app.services.search_service import text_embedding_model_service
-
-import logging
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manages application startup events."""
-    logging.basicConfig(level=logging.INFO)
-    try:
-        # Test MongoDB connection
-        client.admin.command('ping')
-        logging.info("MongoDB connection successful!")
-    except Exception as e:
-        logging.error(f"MongoDB connection failed: {e}")
-    yield
-    # Add shutdown logic here in the future if needed.
+from app.database import async_db, async_health_check
 
 app = FastAPI(
     title="Toweel backend API",
-    summary="Test vector search.",
-    lifespan=lifespan,
+    summary="Toweel backend API",
 )
 
 # Add CORS middleware configuration
@@ -49,13 +23,9 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
 )
 
-client = motor.motor_asyncio.AsyncIOMotorClient(os.environ["MONGODB_URI"])
-db = client.GoEmotion
+# Get database and collection instances from the centralized database module
+db = async_db
 vectorized_text_collection = db.get_collection("vectorizedText")
-
-# Represents an ObjectId field in the database.
-# It will be represented as a `str` on the model so that it can be serialized to JSON.
-PyObjectId = Annotated[str, BeforeValidator(str)]
 
 @app.get("/health")
 async def health_check():
@@ -68,11 +38,10 @@ async def health_check():
         }
     }
     
-    # Check MongoDB connection
-    try:
-        await db.command("ping")
+    # Check MongoDB connection using centralized health check
+    if await async_health_check():
         status_details["services"]["database"] = "connected"
-    except Exception as e:
+    else:
         status_details["services"]["database"] = "disconnected"
         status_details["status"] = "unhealthy"
     

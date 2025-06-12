@@ -1,13 +1,8 @@
 import os
 import numpy as np
 import collections.abc
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import Dict, Any
 from google import genai
-from .search_service import (
-    _get_vertex_embedding_service,
-    split_into_sentences_service
-)
 import json
 
 # This threshold determines if the input has enough substance to be searchable.

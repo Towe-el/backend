@@ -6,8 +6,7 @@ from typing import List, Optional, Dict
 from functools import lru_cache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from pymongo import MongoClient
-from pymongo.server_api import ServerApi
+from app.database import sync_db, sync_client
 
 # Google Cloud Vertex AI setup
 from google.cloud import aiplatform
@@ -22,10 +21,6 @@ CRED_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 LOCATION = "europe-west1"
 MODEL_NAME = "text-embedding-005"
 
-MONGO_URI = os.getenv("MONGODB_URI")
-DB_NAME = os.getenv("MONGODB_DATABASE", "GoEmotion")
-COLLECTION_NAME = os.getenv("MONGODB_COLLECTION", "vectorizedText")
-
 # --- Global variables for initialized clients/models ---
 db_collection_service = None
 text_embedding_model_service = None
@@ -36,8 +31,6 @@ print("Initializing Search Service...")
 # Validate core environment variables at module load time
 if not PROJECT_ID:
     print("FATAL ERROR in search_service: GOOGLE_CLOUD_PROJECT env var not set.")
-if not MONGO_URI:
-    print("FATAL ERROR in search_service: MONGODB_URI env var not set.")
 
 if CRED_PATH and not os.path.exists(CRED_PATH):
     print(f"Warning in search_service: Credential file specified by GOOGLE_APPLICATION_CREDENTIALS not found.")
@@ -66,18 +59,14 @@ except Exception as e_vertex:
     print(f"FATAL ERROR in search_service: Failed to initialize Vertex AI or load model: {e_vertex}")
     text_embedding_model_service = None
 
-# Connect to MongoDB (runs once when module is imported)
+# Connect to MongoDB
 try:
-    if MONGO_URI:
-        print(f"search_service: Connecting to MongoDB...")
-        mongo_client_service = MongoClient(MONGO_URI, server_api=ServerApi('1'))
-        mongo_client_service.admin.command('ping')  # Test connection
-        print("search_service: MongoDB connection successful.")
-        db = mongo_client_service[DB_NAME]
-        db_collection_service = db[COLLECTION_NAME]
-    else:
-        db_collection_service = None
-        print("search_service: MongoDB not connected due to missing MONGO_URI.")
+    from app.database import COLLECTION_NAME
+    print(f"search_service: MongoDB connecting...")
+    # Test the connection
+    sync_client.admin.command('ping')
+    print("search_service: MongoDB connection successful.")
+    db_collection_service = sync_db[COLLECTION_NAME]
 except Exception as e_mongo:
     print(f"FATAL ERROR in search_service: Could not connect to MongoDB: {e_mongo}")
     db_collection_service = None

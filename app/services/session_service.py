@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-from app.database import db
+from app.database import async_db
 
 class SessionService:
     """
@@ -14,7 +14,7 @@ class SessionService:
         """
         Initializes the service and gets a reference to the 'sessions' collection.
         """
-        self.db = db
+        self.db = async_db
         self.collection = self.db["sessions"]
         print("SessionService initialized. MongoDB collection: sessions")
 

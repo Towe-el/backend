@@ -16,6 +16,7 @@ import motor.motor_asyncio
 from pymongo import ReturnDocument
 
 from app.api.endpoints import search
+from app.api.endpoints import debug
 from app.services.search_service import text_embedding_model_service
 
 import logging
@@ -93,3 +94,4 @@ async def health_check():
 
 # Include the search router
 app.include_router(search.router)
+app.include_router(debug.router)

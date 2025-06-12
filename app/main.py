@@ -1,6 +1,7 @@
 import os
 from typing import Optional, List
 import datetime
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Body, HTTPException, status
 from fastapi.responses import Response
@@ -17,9 +18,25 @@ from pymongo import ReturnDocument
 from app.api.endpoints import search
 from app.services.search_service import text_embedding_model_service
 
+import logging
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manages application startup events."""
+    logging.basicConfig(level=logging.INFO)
+    try:
+        # Test MongoDB connection
+        client.admin.command('ping')
+        logging.info("MongoDB connection successful!")
+    except Exception as e:
+        logging.error(f"MongoDB connection failed: {e}")
+    yield
+    # Add shutdown logic here in the future if needed.
+
 app = FastAPI(
     title="Toweel backend API",
     summary="Test vector search.",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware configuration

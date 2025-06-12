@@ -14,9 +14,14 @@ class SessionService:
         """
         Initializes the service and gets a reference to the 'sessions' collection.
         """
-        self.db = async_db
-        self.collection = self.db["sessions"]
-        print("SessionService initialized. MongoDB collection: sessions")
+        if async_db is None:
+            print("Warning: async_db is None. Database operations will fail.")
+            self.db = None
+            self.collection = None
+        else:
+            self.db = async_db
+            self.collection = self.db["sessions"]
+            print("SessionService initialized. MongoDB collection: sessions")
 
     async def create_session(self) -> str:
         """
@@ -25,6 +30,9 @@ class SessionService:
         Returns:
             The unique session ID for the newly created session.
         """
+        if self.collection is None:
+            raise RuntimeError("Database not available")
+            
         session_id = str(uuid.uuid4())
         session_data = {
             "_id": session_id,
@@ -48,7 +56,7 @@ class SessionService:
         Returns:
             The session data as a dictionary, or None if not found.
         """
-        if not session_id:
+        if not session_id or self.collection is None:
             return None
         return await self.collection.find_one({"_id": session_id})
 
@@ -63,6 +71,9 @@ class SessionService:
         Returns:
             True if the update was successful, False otherwise.
         """
+        if self.collection is None:
+            return False
+            
         update_data["updated_at"] = datetime.now(timezone.utc)
         result = await self.collection.update_one(
             {"_id": session_id},

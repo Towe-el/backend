@@ -23,6 +23,10 @@ class TextQuery(BaseModel):
 class BaseResponse(BaseModel):
     session_id: str
 
+class SessionResponse(BaseModel):
+    session_id: str
+    message: str
+
 class SearchResponse(BaseResponse):
     results: List[Dict] = []
     rag_analysis: Optional[Dict] = None
@@ -162,4 +166,21 @@ async def get_session_status():
             "input_count": len(guide_service.accumulated_input)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting session status: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error getting session status: {str(e)}")
+
+@router.get("/session", response_model=SessionResponse, summary="Create a new session")
+async def create_new_session():
+    """
+    Creates a new session and returns the session_id.
+    This endpoint allows the frontend to obtain a session_id before making any POST requests,
+    avoiding the issue of session_id binding order.
+    """
+    try:
+        session_id = await session_service.create_session()
+        return SessionResponse(
+            session_id=session_id,
+            message="New session created successfully"
+        )
+    except Exception as e:
+        print(f"Error in /search/session endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create new session.") 

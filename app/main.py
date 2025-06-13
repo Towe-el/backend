@@ -17,7 +17,7 @@ app = FastAPI(
 # Add CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://toweel-frontend.web.app", "https://toweel-frontend.firebaseapp.com"],
+    allow_origins=["http://localhost:5173", "https://toweel-frontend.web.app", "https://toweel-frontend.firebaseapp.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

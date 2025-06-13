@@ -17,10 +17,10 @@ app = FastAPI(
 # Add CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all sources, should be set to specific sources in production
+    allow_origins=["https://toweel-frontend.web.app", "https://toweel-frontend.firebaseapp.com"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all HTTP methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Get database and collection instances from the centralized database module

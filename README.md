@@ -95,7 +95,7 @@ If you want to try the backend of your own, please replace the environment varia
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/Towe-el/backend.git
 cd backend
 
 # Create virtual environment
@@ -170,7 +170,6 @@ Visit `http://localhost:8080/health` to check service status:
 
 ### CORS Configuration
 Default allowed domains:
-- `http://localhost:5173` (development environment)
 - `https://toweel-frontend.web.app` (production environment)
 - `https://toweel-frontend.firebaseapp.com` (Firebase hosting)
 

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.endpoints import search
 from app.api.endpoints import debug
+from app.api.endpoints import history
 from app.services.search_service import text_embedding_model_service
 from app.database import async_db, async_health_check
 
@@ -61,6 +62,7 @@ async def health_check():
     
     return status_details
 
-# Include the search router
+# Include the routers
 app.include_router(search.router)
 app.include_router(debug.router)
+app.include_router(history.router)

@@ -149,7 +149,7 @@ class ConversationGuideService:
         Refer to the analysis to understand why the user needs to provide more detail: "{analysis_reasoning}"
 
         Your approach should be:
-        1. Acknowledge what they've shared with empathy (1-2 sentences)
+        1. Acknowledge what they've shared with empathy with only 1 sentence, using various ways to express empathy
         2. Act as a caring friend who wants to understand better
 
         If they need more detail, help them explore through:

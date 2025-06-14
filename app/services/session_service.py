@@ -129,6 +129,8 @@ class SessionService:
                 "ready_for_search": False,
             }
         )
+    
+
 
     async def get_or_create_session(self, session_id: Optional[str]) -> Dict[str, Any]:
         """

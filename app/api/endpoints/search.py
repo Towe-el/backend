@@ -148,8 +148,6 @@ async def execute_search(session_id: str = Header(..., description="The session 
         
         search_result = await asyncio.to_thread(perform_semantic_search, accumulated_text, 30)
         
-        await session_service.clear_accumulated_text(session_id)
-        
         return SearchResponse(
             session_id=session_id,
             results=search_result.get("results", []),

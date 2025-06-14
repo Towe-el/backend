@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from app.services.search_service import perform_semantic_search
 from app.services.conversation_guide_service import ConversationGuideService
 from app.services.session_service import SessionService
+from app.services.history_service import HistoryService
 
 router = APIRouter(
     prefix="/search",
@@ -16,6 +17,7 @@ router = APIRouter(
 # These are now mostly stateless or manage state externally (like SessionService)
 session_service = SessionService()
 guide_service = ConversationGuideService()
+history_service = HistoryService()
 
 class TextQuery(BaseModel):
     text: str
@@ -30,6 +32,7 @@ class SessionResponse(BaseModel):
 class SearchResponse(BaseResponse):
     results: List[Dict] = []
     rag_analysis: Optional[Dict] = None
+    title: Optional[str] = None
     message: Optional[str] = "Search completed successfully."
 
 class GuidanceResponse(BaseResponse):
@@ -146,12 +149,21 @@ async def execute_search(session_id: str = Header(..., description="The session 
         accumulated_text = session["accumulated_text"]
         print(f"Executing search for session {session_id} with text: '{accumulated_text}'")
         
+        # Execute search
         search_result = await asyncio.to_thread(perform_semantic_search, accumulated_text, 30)
+        
+        # Generate title for history
+        title = None
+        if accumulated_text.strip():
+            print(f"[execute_search] Generating title for session {session_id}...")
+            title = await history_service.generate_title(accumulated_text)
+            print(f"[execute_search] Generated title: '{title}'")
         
         return SearchResponse(
             session_id=session_id,
             results=search_result.get("results", []),
             rag_analysis=search_result.get("rag_analysis"),
+            title=title,
         )
         
     except Exception as e:

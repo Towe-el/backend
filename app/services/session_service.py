@@ -57,8 +57,20 @@ class SessionService:
             The session data as a dictionary, or None if not found.
         """
         if not session_id or self.collection is None:
+            print(f"[get_session] Early return: session_id={session_id}, collection={self.collection}")
             return None
-        return await self.collection.find_one({"_id": session_id})
+        
+        print(f"[get_session] Looking for session: {session_id}")
+        try:
+            session = await self.collection.find_one({"_id": session_id})
+            if session:
+                print(f"[get_session] Found session {session_id} with input_round={session.get('input_round', 0)}")
+            else:
+                print(f"[get_session] Session {session_id} NOT FOUND in database")
+            return session
+        except Exception as e:
+            print(f"[get_session] Database error looking for session {session_id}: {e}")
+            return None
 
     async def update_session(self, session_id: str, update_data: Dict[str, Any]) -> bool:
         """
@@ -72,18 +84,30 @@ class SessionService:
             True if the update was successful, False otherwise.
         """
         if self.collection is None:
+            print(f"[update_session] Database collection is None")
             return False
             
         update_data["updated_at"] = datetime.now(timezone.utc)
-        result = await self.collection.update_one(
-            {"_id": session_id},
-            {"$set": update_data}
-        )
-        if result.modified_count == 0 and result.matched_count > 0:
-            print(f"Session {session_id} was looked up but not modified.")
-        elif result.modified_count > 0:
-            print(f"Successfully updated session {session_id}.")
-        return result.modified_count > 0 or result.matched_count > 0
+        print(f"[update_session] Updating session {session_id} with data: {update_data}")
+        
+        try:
+            result = await self.collection.update_one(
+                {"_id": session_id},
+                {"$set": update_data}
+            )
+            print(f"[update_session] Update result - matched: {result.matched_count}, modified: {result.modified_count}")
+            
+            if result.modified_count == 0 and result.matched_count > 0:
+                print(f"Session {session_id} was looked up but not modified.")
+            elif result.modified_count > 0:
+                print(f"Successfully updated session {session_id}.")
+            elif result.matched_count == 0:
+                print(f"[update_session] WARNING: Session {session_id} not found for update!")
+                
+            return result.modified_count > 0 or result.matched_count > 0
+        except Exception as e:
+            print(f"[update_session] Database error updating session {session_id}: {e}")
+            return False
     
     async def clear_accumulated_text(self, session_id: str) -> bool:
         """
@@ -116,12 +140,16 @@ class SessionService:
         Returns:
             A session data dictionary (either existing or newly created).
         """
+        print(f"[get_or_create_session] Called with session_id: {session_id}")
         session = None
         if session_id:
             session = await self.get_session(session_id)
         
         if not session:
+            print(f"[get_or_create_session] Creating new session because existing session not found")
             new_session_id = await self.create_session()
             session = await self.get_session(new_session_id)
+        else:
+            print(f"[get_or_create_session] Using existing session {session_id}")
 
         return session 

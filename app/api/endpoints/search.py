@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Request
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import asyncio
@@ -95,7 +95,7 @@ def _auto_clear_old_sessions():
         print(f"Error in auto session cleanup: {e}")
 
 @router.post("/", response_model=GuidanceResponse, summary="Process user's text input")
-async def process_text_input(query: TextQuery, session_id: Optional[str] = Header(None)):
+async def process_text_input(query: TextQuery, request: Request, session_id: Optional[str] = Header(None)):
     """
     Processes user's text input. Manages session state in the database.
     - If session_id is not provided in the header, a new session is created.
@@ -105,8 +105,14 @@ async def process_text_input(query: TextQuery, session_id: Optional[str] = Heade
     if not query.text.strip():
         raise HTTPException(status_code=400, detail="Query text cannot be empty.")
 
+    # Debug: Print all headers
+    print(f"[process_text_input] All headers: {dict(request.headers)}")
+    print(f"[process_text_input] Received session_id from header: {session_id}")
+    print(f"[process_text_input] User text: '{query.text}'")
+
     try:
         session = await session_service.get_or_create_session(session_id)
+        print(f"[process_text_input] Got session {session['_id']} with input_round={session.get('input_round', 0)}")
         
         guide_result = await guide_service.process_user_input(
             user_text=query.text,
@@ -114,7 +120,11 @@ async def process_text_input(query: TextQuery, session_id: Optional[str] = Heade
             current_round=session.get("input_round", 0)
         )
         
+        print(f"[process_text_input] Guide result - new input_round: {guide_result.get('input_round', 'N/A')}")
+        print(f"[process_text_input] Guide result - accumulated_text length: {len(guide_result.get('accumulated_text', ''))}")
+        
         await session_service.update_session(session["_id"], guide_result)
+        print(f"[process_text_input] Updated session {session['_id']}")
         
         return GuidanceResponse(session_id=session["_id"], **guide_result)
         
